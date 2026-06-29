@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\Melissa\\\\Desktop\\\\Dynasty-portal\\\\src\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName | ForEach-Object { $_.FullName.Replace\\(\"C:\\\\Users\\\\Melissa\\\\Desktop\\\\Dynasty-portal\\\\src\\\\\",\"src/\"\\) })",
+      "PowerShell(Receive-Job *)",
+      "PowerShell(Start-Sleep -Seconds 5; Invoke-WebRequest -Uri \"http://localhost:3000/login\" -UseBasicParsing -TimeoutSec 10 2>&1 | Select-Object StatusCode, StatusDescription)"
+    ]
+  }
+}

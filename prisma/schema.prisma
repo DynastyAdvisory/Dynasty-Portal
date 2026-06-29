@@ -1,0 +1,166 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  ACCOUNTANT
+  BOOKKEEPER
+  CLIENT
+}
+
+enum FiscalYearStatus {
+  OPEN
+  CLOSED
+}
+
+// ─── Core user & client models ────────────────────────────
+
+model Profile {
+  id        String   @id @db.Uuid
+  email     String   @unique
+  name      String?
+  role      Role     @default(BOOKKEEPER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  clientId    String?            @map("client_id")
+  client      Client?            @relation("ClientUsers", fields: [clientId], references: [id])
+  assignments ClientAssignment[]
+
+  @@map("profiles")
+}
+
+model Client {
+  id            String   @id @default(cuid())
+  name          String
+  industry      String?
+  taxType       String   @default("GST_5") @map("tax_type")
+  taxRate       Float    @default(0.05) @map("tax_rate")
+  filingFreq    String   @default("Quarterly") @map("filing_freq")
+  craNumber     String?  @map("cra_number")
+  fiscalYearEnd Int      @default(12) @map("fiscal_year_end")
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  users               Profile[]           @relation("ClientUsers")
+  assignments         ClientAssignment[]
+  fiscalYears         FiscalYear[]
+  monthlyEntries      MonthlyEntry[]
+  balanceSheetEntries BalanceSheetEntry[]
+  periodLocks         PeriodLock[]
+  auditLogs           AuditLog[]
+
+  @@map("clients")
+}
+
+model ClientAssignment {
+  id        String   @id @default(cuid())
+  clientId  String   @map("client_id")
+  profileId String   @map("profile_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, profileId])
+  @@map("client_assignments")
+}
+
+// ─── Financial data models ────────────────────────────────
+
+model FiscalYear {
+  id        String           @id @default(cuid())
+  clientId  String           @map("client_id")
+  year      Int
+  status    FiscalYearStatus @default(OPEN)
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  client              Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  monthlyEntries      MonthlyEntry[]
+  balanceSheetEntries BalanceSheetEntry[]
+  periodLocks         PeriodLock[]
+
+  @@unique([clientId, year])
+  @@map("fiscal_years")
+}
+
+model MonthlyEntry {
+  id           String   @id @default(cuid())
+  clientId     String   @map("client_id")
+  fiscalYearId String   @map("fiscal_year_id")
+  accountCode  String   @map("account_code")
+  month        Int
+  grossAmount  Decimal  @default(0) @map("gross_amount") @db.Decimal(12, 2)
+  updatedBy    String?  @map("updated_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, fiscalYearId, accountCode, month])
+  @@map("monthly_entries")
+}
+
+model BalanceSheetEntry {
+  id           String   @id @default(cuid())
+  clientId     String   @map("client_id")
+  fiscalYearId String   @map("fiscal_year_id")
+  accountCode  String   @map("account_code")
+  amount       Decimal  @default(0) @db.Decimal(12, 2)
+  isOpening    Boolean  @default(false) @map("is_opening")
+  updatedBy    String?  @map("updated_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, fiscalYearId, accountCode, isOpening])
+  @@map("balance_sheet_entries")
+}
+
+model PeriodLock {
+  id           String    @id @default(cuid())
+  clientId     String    @map("client_id")
+  fiscalYearId String    @map("fiscal_year_id")
+  month        Int
+  lockedAt     DateTime  @default(now()) @map("locked_at")
+  lockedBy     String    @map("locked_by") @db.Uuid
+  unlockedAt   DateTime? @map("unlocked_at")
+  unlockedBy   String?   @map("unlocked_by") @db.Uuid
+  unlockNote   String?   @map("unlock_note")
+
+  client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, fiscalYearId, month])
+  @@map("period_locks")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  clientId  String?  @map("client_id")
+  profileId String   @map("profile_id") @db.Uuid
+  action    String
+  tableName String   @map("table_name")
+  recordId  String   @map("record_id")
+  oldValues Json?    @map("old_values")
+  newValues Json?    @map("new_values")
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@map("audit_log")
+}
