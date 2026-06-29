@@ -4,8 +4,10 @@ import { TAX_TYPES, INDUSTRY_FILTERS } from "@/lib/accounts"
 import { useActionState } from "react"
 import type { Client } from "@/generated/prisma/client"
 
+type FormState = { error?: Record<string, string[]> } | undefined
+
 interface ClientFormProps {
-  action: (formData: FormData) => Promise<{ error?: Record<string, string[]> } | void>
+  action: (prevState: FormState, formData: FormData) => Promise<FormState>
   client?: Client
 }
 

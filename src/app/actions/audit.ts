@@ -14,7 +14,18 @@ interface AuditParams {
 }
 
 export async function logAudit(params: AuditParams) {
-  await prisma.auditLog.create({ data: params })
+  await prisma.auditLog.create({
+    data: {
+      clientId: params.clientId ?? null,
+      profileId: params.profileId,
+      action: params.action,
+      tableName: params.tableName,
+      recordId: params.recordId,
+      oldValues: params.oldValues ?? undefined,
+      newValues: params.newValues ?? undefined,
+      note: params.note ?? null,
+    },
+  })
 }
 
 export async function getAuditLogs(clientId?: string, limit = 100) {

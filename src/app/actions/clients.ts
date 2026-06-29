@@ -16,7 +16,9 @@ const ClientSchema = z.object({
   fiscalYearEnd: z.coerce.number().min(1).max(12),
 })
 
-export async function createClient(formData: FormData) {
+type FormState = { error?: Record<string, string[]> } | undefined
+
+export async function createClient(_prevState: FormState, formData: FormData): Promise<FormState> {
   const profile = await getCurrentProfile()
   if (!profile || profile.role !== "ADMIN") throw new Error("Unauthorized")
 
@@ -38,7 +40,7 @@ export async function createClient(formData: FormData) {
   redirect(`/admin/clients`)
 }
 
-export async function updateClient(clientId: string, formData: FormData) {
+export async function updateClient(clientId: string, _prevState: FormState, formData: FormData): Promise<FormState> {
   const profile = await getCurrentProfile()
   if (!profile || profile.role !== "ADMIN") throw new Error("Unauthorized")
 

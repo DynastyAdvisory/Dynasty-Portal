@@ -47,7 +47,7 @@ export default function BalanceSheetClient({ clientId, fiscalYearId, entries, ne
     const val = parseInput(e.target.value)
     const prev = (isOpening ? openMap : closeMap)[code] ?? 0
     if (val === prev) return
-    startTransition(() => saveBalanceSheetEntry(clientId, fiscalYearId, code, val, isOpening))
+    startTransition(async () => { await saveBalanceSheetEntry(clientId, fiscalYearId, code, val, isOpening) })
   }
 
   return (
