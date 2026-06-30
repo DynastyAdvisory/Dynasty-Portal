@@ -62,6 +62,38 @@ export async function toggleClientActive(clientId: string, active: boolean) {
 
   await prisma.client.update({ where: { id: clientId }, data: { active } })
   revalidatePath("/admin/clients")
+  revalidatePath("/financials")
+}
+
+// Modal-safe: no redirect, returns result
+export async function saveClientModal(
+  clientId: string | null,
+  _prevState: { error?: string } | undefined,
+  formData: FormData
+): Promise<{ error?: string; clientId?: string }> {
+  const profile = await getCurrentProfile()
+  if (!profile || profile.role !== "ADMIN") return { error: "Unauthorized" }
+
+  const parsed = ClientSchema.safeParse(Object.fromEntries(formData))
+  if (!parsed.success) {
+    const first = Object.values(parsed.error.flatten().fieldErrors).flat()[0]
+    return { error: first ?? "Invalid input" }
+  }
+
+  const data = { ...parsed.data, craNumber: parsed.data.craNumber || null }
+
+  if (!clientId) {
+    const client = await prisma.client.create({ data })
+    const currentYear = new Date().getFullYear()
+    await prisma.fiscalYear.create({ data: { clientId: client.id, year: currentYear } })
+    revalidatePath("/financials")
+    return { clientId: client.id }
+  } else {
+    await prisma.client.update({ where: { id: clientId }, data })
+    revalidatePath("/financials")
+    revalidatePath(`/admin/clients/${clientId}`)
+    return { clientId }
+  }
 }
 
 export async function getClientsForStaff() {

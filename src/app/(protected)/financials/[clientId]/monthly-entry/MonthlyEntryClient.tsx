@@ -258,7 +258,7 @@ export default function MonthlyEntryClient({
                       {isStaff && (
                         <button
                           onClick={() => handleToggleHidden(code, isHidden)}
-                          className={`shrink-0 transition-colors ${isHidden ? "text-amber-500 hover:text-amber-700" : "text-gray-200 hover:text-gray-400"}`}
+                          className={`shrink-0 transition-colors ${isHidden ? "text-amber-500 hover:text-amber-700" : "text-gray-400 hover:text-gray-600"}`}
                           title={isHidden ? "Account is hidden in reports — click to show" : "Hide this account"}
                         >
                           {isHidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}

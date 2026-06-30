@@ -240,9 +240,9 @@ export default function UsersClient({
   clients: Client[]
   currentUserRole?: string
 }) {
-  const [tab, setTab] = useState<"internal" | "clients">("internal")
-  const [showInvite, setShowInvite] = useState(false)
   const isAdmin = currentUserRole === "ADMIN"
+  const [tab, setTab] = useState<"internal" | "clients">(isAdmin ? "internal" : "clients")
+  const [showInvite, setShowInvite] = useState(false)
 
   const internalProfiles = profiles.filter((p) => p.role !== "CLIENT")
   const clientProfiles = profiles.filter((p) => p.role === "CLIENT")
@@ -252,17 +252,24 @@ export default function UsersClient({
     <div className="p-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div className="flex gap-1.5">
-          {(["internal", "clients"] as const).map((t) => (
+          {isAdmin && (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              onClick={() => setTab("internal")}
               className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors ${
-                tab === t ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                tab === "internal" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
-              {t === "internal" ? `Internal (${internalProfiles.length})` : `Clients (${clientProfiles.length})`}
+              Internal ({internalProfiles.length})
             </button>
-          ))}
+          )}
+          <button
+            onClick={() => setTab("clients")}
+            className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors ${
+              tab === "clients" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            Clients ({clientProfiles.length})
+          </button>
         </div>
         <button
           onClick={() => setShowInvite(true)}

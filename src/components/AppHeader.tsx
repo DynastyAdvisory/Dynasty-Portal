@@ -51,37 +51,35 @@ export default function AppHeader({ userName, userEmail, userRole, activePath }:
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
               activePath === "financials"
                 ? "bg-blue-50 text-blue-700"
-                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
             }`}
           >
             Financials
           </Link>
 
-          {isStaff && (
+          {isAdmin && (
             <>
-              <span className="text-gray-200 px-1 select-none">|</span>
+              <span className="text-gray-300 px-1 select-none">|</span>
               <Link
                 href="/settings/users"
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   activePath === "users"
                     ? "bg-purple-100 text-purple-800"
-                    : "text-purple-600 hover:bg-purple-50 hover:text-purple-800"
+                    : "text-purple-700 hover:bg-purple-50 hover:text-purple-900"
                 }`}
               >
                 Users
               </Link>
-              {isAdmin && (
-                <Link
-                  href="/admin/audit-log"
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    activePath === "audit-log"
-                      ? "bg-purple-100 text-purple-800"
-                      : "text-purple-600 hover:bg-purple-50 hover:text-purple-800"
-                  }`}
-                >
-                  Audit Log
-                </Link>
-              )}
+              <Link
+                href="/admin/audit-log"
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  activePath === "audit-log"
+                    ? "bg-purple-100 text-purple-800"
+                    : "text-purple-700 hover:bg-purple-50 hover:text-purple-900"
+                }`}
+              >
+                Audit Log
+              </Link>
             </>
           )}
         </nav>
