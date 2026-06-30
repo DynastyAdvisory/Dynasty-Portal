@@ -31,6 +31,29 @@ function parseInput(val: string): number {
 export default function BalanceSheetClient({ clientId, fiscalYearId, entries, netIncome, gstPayable, isReadOnly }: Props) {
   const [isPending, startTransition] = useTransition()
 
+  function downloadCSV() {
+    const rows: (string | number)[][] = [["Code", "Account", "Opening Balance", "Closing Balance"]]
+    for (let idx = 0; idx < BALANCE_SHEET_ROWS.length; idx++) {
+      const row = BALANCE_SHEET_ROWS[idx]
+      if (row.type === "SECTION") { rows.push([row.label]); continue }
+      if (row.type === "ACCOUNT") { rows.push([row.code!, row.label, openMap[row.code!] ?? 0, closeMap[row.code!] ?? 0]); continue }
+      if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
+        let startI = 0
+        for (let j = idx - 1; j >= 0; j--) {
+          const t = BALANCE_SHEET_ROWS[j].type
+          if (t === "SUBTOTAL" || t === "TOTAL" || t === "SECTION") { startI = j + 1; break }
+        }
+        const acc = BALANCE_SHEET_ROWS.slice(startI, idx).filter((r) => r.type === "ACCOUNT" && r.code)
+        rows.push(["", row.label, acc.reduce((s, r) => s + (openMap[r.code!] ?? 0), 0), acc.reduce((s, r) => s + (closeMap[r.code!] ?? 0), 0)])
+      }
+    }
+    const csv = rows.map((r) => r.map((c) => { const s = String(c); return s.includes(",") ? `"${s}"` : s }).join(",")).join("\n")
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a"); a.href = url; a.download = "balance-sheet.csv"; a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const openMap: Record<string, number> = {}
   const closeMap: Record<string, number> = {}
   for (const e of entries) {
@@ -52,6 +75,10 @@ export default function BalanceSheetClient({ clientId, fiscalYearId, entries, ne
 
   return (
     <div className="overflow-x-auto">
+      <div className="flex gap-2 px-4 py-2 no-print">
+        <button onClick={downloadCSV} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900 transition-colors">Export CSV</button>
+        <button onClick={() => window.print()} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900 transition-colors">Print / PDF</button>
+      </div>
       <table className="w-full text-xs border-collapse min-w-[600px]">
         <thead className="sticky top-0 z-10 bg-white">
           <tr>

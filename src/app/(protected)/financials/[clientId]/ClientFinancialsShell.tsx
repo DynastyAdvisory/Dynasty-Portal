@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useState, useTransition, useRef, useEffect, Suspense } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { FileSpreadsheet, TrendingUp, BookOpen, Receipt, Plus, Check, X, Settings, Home, Lock, LogOut, ChevronDown } from "lucide-react"
+import { FileSpreadsheet, TrendingUp, BookOpen, Receipt, Plus, Check, X, Settings, Home, Lock, LogOut, ChevronDown, Download } from "lucide-react"
 import { createFiscalYear } from "@/app/actions/fiscalyear"
 import type { FiscalYear } from "@/generated/prisma/client"
 
@@ -194,6 +194,17 @@ function ShellInner({ clientId, clientName, fiscalYears: initialFYs, activeFisca
               </Link>
             )
           })}
+
+          {/* Full report download */}
+          <div className="mt-auto px-3 py-3 border-t border-gray-100">
+            <a
+              href={`/api/export/${clientId}${selectedFyId ? `?fy=${selectedFyId}` : ""}`}
+              className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors w-full"
+            >
+              <Download className="w-4 h-4 shrink-0" />
+              Full Report (Excel)
+            </a>
+          </div>
         </nav>
 
         {/* Mobile bottom nav */}
