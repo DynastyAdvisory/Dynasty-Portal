@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useState, useTransition, Suspense } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { LogOut, FileSpreadsheet, TrendingUp, BookOpen, Receipt, ChevronDown, ChevronRight, Plus, Check, X } from "lucide-react"
+import { LogOut, FileSpreadsheet, TrendingUp, BookOpen, Receipt, Plus, Check, X, Settings } from "lucide-react"
 import { createFiscalYear } from "@/app/actions/fiscalyear"
 import type { FiscalYear } from "@/generated/prisma/client"
 
@@ -35,6 +35,7 @@ function ShellInner({ clientId, clientName, fiscalYears: initialFYs, activeFisca
     { label: "P&L", href: `/financials/${clientId}/pl`, icon: <TrendingUp className="w-4 h-4" /> },
     { label: "Balance Sheet", href: `/financials/${clientId}/balance-sheet`, icon: <BookOpen className="w-4 h-4" /> },
     { label: "GST Tracker", href: `/financials/${clientId}/gst-tracker`, icon: <Receipt className="w-4 h-4" /> },
+    ...(isAdmin ? [{ label: "Settings", href: `/financials/${clientId}/settings`, icon: <Settings className="w-4 h-4" /> }] : []),
   ]
 
   function navHref(base: string) {

@@ -31,7 +31,18 @@ function fmt(n: number) {
   return n.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function parseInput(v: string) { return parseFloat(v.replace(/,/g, "")) || 0 }
+function parseInput(v: string): number {
+  const clean = v.replace(/,/g, "").trim()
+  if (!clean) return 0
+  if (/[+\-*/()]/.test(clean) && /^[\d\s+\-*/.()]+$/.test(clean)) {
+    try {
+      // eslint-disable-next-line no-new-func
+      const result = new Function(`"use strict"; return (${clean})`)()
+      if (typeof result === "number" && isFinite(result)) return Math.round(result * 100) / 100
+    } catch { /* fall through */ }
+  }
+  return parseFloat(clean) || 0
+}
 
 export default function MonthlyEntryClient({
   clientId, fiscalYearId, defaultTaxRate, entries, locks, taxCodes, accountConfigs, customAccounts, isStaff,
