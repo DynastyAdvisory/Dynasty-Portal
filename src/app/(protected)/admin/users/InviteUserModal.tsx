@@ -12,14 +12,14 @@ interface Props {
 }
 
 export default function InviteUserModal({ clients, onClose, currentUserRole = "ADMIN" }: Props) {
-  const [role, setRole] = useState("BOOKKEEPER")
+  const isStaffInviter = currentUserRole === "ACCOUNTANT" || currentUserRole === "BOOKKEEPER"
+  const [role, setRole] = useState(isStaffInviter ? "CLIENT" : "BOOKKEEPER")
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ tempPassword: string; name: string } | null>(null)
   const [copied, setCopied] = useState(false)
   const [showPw, setShowPw] = useState(false)
 
-  const isStaffInviter = currentUserRole === "ACCOUNTANT" || currentUserRole === "BOOKKEEPER"
   const allowedRoles = isStaffInviter
     ? [{ value: "CLIENT", label: "Client" }]
     : [

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { updateUserRole, assignUserToClient, removeUserFromClient, resetUserPassword } from "@/app/actions/users"
+import { updateUserRole, assignUserToClient, removeUserFromClient, resetUserPassword, setClientForUser } from "@/app/actions/users"
 import InviteUserModal from "./InviteUserModal"
 import { ChevronDown, ChevronRight, X, Plus, KeyRound, Eye, EyeOff, Check } from "lucide-react"
 import type { Profile, Client, ClientAssignment } from "@/generated/prisma/client"
@@ -146,8 +146,25 @@ function UserRow({
                   ))}
               </div>
             )}
-            {profile.role === "CLIENT" && profile.client && (
-              <p className="text-sm text-gray-500 mt-0.5 ml-5">Company: {profile.client.name}</p>
+            {profile.role === "CLIENT" && (
+              <div className="ml-5 mt-1.5">
+                {isAdmin ? (
+                  <select
+                    defaultValue={profile.clientId ?? ""}
+                    onChange={(e) => startTransition(async () => { await setClientForUser(profile.id, e.target.value || null) })}
+                    className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 max-w-xs"
+                  >
+                    <option value="">— No client assigned —</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-sm text-gray-500">
+                    {profile.client ? profile.client.name : <span className="text-gray-400 italic">No client assigned</span>}
+                  </span>
+                )}
+              </div>
             )}
           </div>
 

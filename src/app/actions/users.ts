@@ -77,11 +77,21 @@ export async function updateUserRole(profileId: string, role: "ADMIN" | "ACCOUNT
 
   await prisma.profile.update({ where: { id: profileId }, data: { role } })
   revalidatePath("/admin/users")
+  revalidatePath("/settings/users")
+}
+
+export async function setClientForUser(profileId: string, clientId: string | null) {
+  const me = await getCurrentProfile()
+  if (!me || me.role === "CLIENT") throw new Error("Unauthorized")
+
+  await prisma.profile.update({ where: { id: profileId }, data: { clientId: clientId || null } })
+  revalidatePath("/admin/users")
+  revalidatePath("/settings/users")
 }
 
 export async function assignUserToClient(profileId: string, clientId: string) {
   const me = await getCurrentProfile()
-  if (!me || me.role !== "ADMIN") throw new Error("Unauthorized")
+  if (!me || me.role === "CLIENT") throw new Error("Unauthorized")
 
   await prisma.clientAssignment.upsert({
     where: { clientId_profileId: { clientId, profileId } },
@@ -89,14 +99,16 @@ export async function assignUserToClient(profileId: string, clientId: string) {
     update: {},
   })
   revalidatePath("/admin/users")
+  revalidatePath("/settings/users")
 }
 
 export async function removeUserFromClient(profileId: string, clientId: string) {
   const me = await getCurrentProfile()
-  if (!me || me.role !== "ADMIN") throw new Error("Unauthorized")
+  if (!me || me.role === "CLIENT") throw new Error("Unauthorized")
 
   await prisma.clientAssignment.deleteMany({ where: { profileId, clientId } })
   revalidatePath("/admin/users")
+  revalidatePath("/settings/users")
 }
 
 export async function resetUserPassword(profileId: string, newPassword: string) {
