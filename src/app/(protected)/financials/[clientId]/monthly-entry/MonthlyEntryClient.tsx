@@ -396,11 +396,11 @@ export default function MonthlyEntryClient({
                       </td>
                     ))}
                     {ccTotals.map((v, ci) => (
-                      <td key={`cc-${ci}`} className="px-1.5 py-2 text-right text-gray-800 tabular-nums text-xs bg-blue-50/30">
+                      <td key={`cc-${ci}`} className="px-1.5 py-2 text-right text-gray-800 tabular-nums text-xs">
                         {v !== 0 ? fmt(v) : ""}
                       </td>
                     ))}
-                    {isStaff && <td className="bg-blue-50/30" />}
+                    {isStaff && <td />}
                     <td className="px-4 py-2 text-right text-gray-900 tabular-nums text-xs">{grandTotal !== 0 ? fmt(grandTotal) : ""}</td>
                   </tr>
                 )
@@ -487,21 +487,17 @@ export default function MonthlyEntryClient({
                   })}
                   {customColumns.map((cc) => {
                     const ccVal = ccEntryMap[`${cc.id}-${code}`] ?? 0
-                    const ccTaxName = hasTaxCodes && isStaff && ccVal !== 0 ? getEffectiveTaxName(code, 0) : null
                     return (
-                      <td key={cc.id} className="px-1 py-1 bg-blue-50/20">
+                      <td key={cc.id} className="px-1 py-1">
                         <input
                           defaultValue={ccVal > 0 ? fmt(ccVal) : ""}
                           onBlur={(e) => handleCCBlur(cc.id, code, e)}
                           className="w-full text-right text-xs px-1.5 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-gray-300"
                         />
-                        {ccTaxName && (
-                          <span className="block text-right text-[9px] text-blue-500 px-1.5 pb-0.5">{ccTaxName}</span>
-                        )}
                       </td>
                     )
                   })}
-                  {isStaff && <td className="bg-blue-50/20" />}
+                  {isStaff && <td />}
                   <td className="px-4 py-1.5 text-right text-gray-900 font-medium tabular-nums">
                     {(() => {
                       const ccSum = customColumns.reduce((s, cc) => s + (ccEntryMap[`${cc.id}-${code}`] ?? 0), 0)
