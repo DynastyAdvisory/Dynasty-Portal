@@ -195,11 +195,11 @@ function ShellInner({ clientId, clientName, fiscalYears: initialFYs, activeFisca
             )
           })}
 
-          {/* Full report download */}
-          <div className="mt-auto px-3 py-3 border-t border-gray-100">
+          {/* Full report download — just below nav items */}
+          <div className="px-3 pt-6 pb-2">
             <a
               href={`/api/export/${clientId}${selectedFyId ? `?fy=${selectedFyId}` : ""}`}
-              className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors w-full"
+              className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg transition-colors w-full"
             >
               <Download className="w-4 h-4 shrink-0" />
               Full Report (Excel)
