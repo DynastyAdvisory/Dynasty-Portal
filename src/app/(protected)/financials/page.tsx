@@ -14,6 +14,7 @@ export default async function FinancialsPage() {
   }
 
   const isAdmin = profile.role === "ADMIN"
+  const canManage = true // clients are already redirected above
 
   const clients = isAdmin
     ? await prisma.client.findMany({ orderBy: { name: "asc" } })
@@ -22,7 +23,7 @@ export default async function FinancialsPage() {
           where: { profileId: profile.id },
           include: { client: true },
         })
-      ).map((a) => a.client).filter((c) => c.active)
+      ).map((a) => a.client)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -33,7 +34,7 @@ export default async function FinancialsPage() {
         activePath="financials"
       />
       <div className="p-6 max-w-3xl mx-auto">
-        <FinancialsClientList clients={clients} isAdmin={isAdmin} />
+        <FinancialsClientList clients={clients} canManage={canManage} />
       </div>
     </div>
   )

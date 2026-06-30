@@ -3,3 +3,9 @@
 @theme inline {
   --font-sans: var(--font-geist);
 }
+
+@media print {
+  header, nav, aside, .no-print { display: none !important; }
+  body { background: white !important; }
+  main, [data-main] { overflow: visible !important; }
+}

@@ -96,9 +96,59 @@ export default function MonthlyEntryClient({
 
   function handleCCBlur(columnId: string, accountCode: string, e: React.FocusEvent<HTMLInputElement>) {
     const val = parseInput(e.target.value)
+    e.target.value = val > 0 ? fmt(val) : ""
     const prev = ccEntryMap[`${columnId}-${accountCode}`] ?? 0
     if (val === prev) return
     startTransition(async () => { await saveCustomColumnEntry(clientId, columnId, accountCode, val) })
+  }
+
+  function downloadCSV() {
+    const csvRows: (string | number)[][] = []
+    csvRows.push(["Code", "Account", ...MONTHS, ...customColumns.map((c) => c.name), "Total"])
+    for (const { rows: sectionRowsDef, key } of allSections) {
+      const sectionCustom = customBySection[key] ?? []
+      const allRowsForSection = [...sectionRowsDef]
+      const totalIdx = allRowsForSection.findIndex((r) => r.type === "TOTAL")
+      if (sectionCustom.length > 0 && totalIdx > -1) {
+        const customRows: AccountRow[] = sectionCustom.map((ca) => ({ type: "ACCOUNT" as const, label: ca.name, code: ca.code }))
+        allRowsForSection.splice(totalIdx, 0, ...customRows)
+      }
+      for (const row of allRowsForSection) {
+        if (row.type === "SECTION") { csvRows.push([row.label]); continue }
+        if (row.type === "SUBSECTION") { csvRows.push(["", row.label]); continue }
+        if (row.type === "ACCOUNT" && row.code) {
+          const code = row.code
+          if (hiddenSet.has(code)) continue
+          const monthVals = Array.from({ length: 12 }, (_, mi) => entryMap[`${code}-${mi + 1}`] ?? 0)
+          const ccVals = customColumns.map((cc) => ccEntryMap[`${cc.id}-${code}`] ?? 0)
+          const total = monthVals.reduce((a, b) => a + b, 0) + ccVals.reduce((a, b) => a + b, 0)
+          csvRows.push([code, row.label, ...monthVals, ...ccVals, total])
+        }
+        if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
+          const idx = allRowsForSection.indexOf(row)
+          let startI = 0
+          for (let j = idx - 1; j >= 0; j--) {
+            const t = allRowsForSection[j].type
+            if (t === "SUBTOTAL" || t === "TOTAL" || t === "SECTION" || t === "SUBSECTION") { startI = j + 1; break }
+          }
+          const accRows = allRowsForSection.slice(startI, idx).filter((r) => r.type === "ACCOUNT" && r.code && !hiddenSet.has(r.code!))
+          const monthTotals = Array.from({ length: 12 }, (_, mi) => accRows.reduce((s, r) => s + (entryMap[`${r.code}-${mi + 1}`] ?? 0), 0))
+          const ccTotals = customColumns.map((cc) => accRows.reduce((s, r) => s + (ccEntryMap[`${cc.id}-${r.code}`] ?? 0), 0))
+          const grandTotal = monthTotals.reduce((a, b) => a + b, 0) + ccTotals.reduce((a, b) => a + b, 0)
+          csvRows.push(["", row.label, ...monthTotals, ...ccTotals, grandTotal])
+        }
+      }
+      csvRows.push([])
+    }
+    const csv = csvRows.map((row) => row.map((cell) => {
+      const s = String(cell)
+      return s.includes(",") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s
+    }).join(",")).join("\n")
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url; a.download = "monthly-entry.csv"; a.click()
+    URL.revokeObjectURL(url)
   }
 
   const hiddenSet = new Set(accountConfigs.filter((c) => c.isHidden).map((c) => c.accountCode))
@@ -131,6 +181,7 @@ export default function MonthlyEntryClient({
 
   function handleBlur(code: string, month: number, e: React.FocusEvent<HTMLInputElement>) {
     const val = parseInput(e.target.value)
+    e.target.value = val > 0 ? fmt(val) : ""
     const prev = entryMap[`${code}-${month}`] ?? 0
     if (val === prev) return
     startTransition(async () => { await saveMonthlyEntry(clientId, fiscalYearId, code, month, val) })
@@ -177,6 +228,20 @@ export default function MonthlyEntryClient({
           {hideEmpty ? "Showing non-empty rows" : "Hide empty rows"}
         </button>
         <span className="text-xs text-gray-400">Click section headers to collapse</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={downloadCSV}
+            className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900 transition-colors"
+          >
+            Export CSV
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900 transition-colors"
+          >
+            Print / PDF
+          </button>
+        </div>
       </div>
 
       <table className="w-full text-xs border-collapse" style={{ minWidth: "900px" }}>
@@ -422,6 +487,7 @@ export default function MonthlyEntryClient({
                   })}
                   {customColumns.map((cc) => {
                     const ccVal = ccEntryMap[`${cc.id}-${code}`] ?? 0
+                    const ccTaxName = hasTaxCodes && isStaff && ccVal !== 0 ? getEffectiveTaxName(code, 0) : null
                     return (
                       <td key={cc.id} className="px-1 py-1 bg-blue-50/20">
                         <input
@@ -429,6 +495,9 @@ export default function MonthlyEntryClient({
                           onBlur={(e) => handleCCBlur(cc.id, code, e)}
                           className="w-full text-right text-xs px-1.5 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-gray-300"
                         />
+                        {ccTaxName && (
+                          <span className="block text-right text-[9px] text-blue-500 px-1.5 pb-0.5">{ccTaxName}</span>
+                        )}
                       </td>
                     )
                   })}

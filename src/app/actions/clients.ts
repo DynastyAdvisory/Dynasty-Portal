@@ -58,7 +58,7 @@ export async function updateClient(clientId: string, _prevState: FormState, form
 
 export async function toggleClientActive(clientId: string, active: boolean) {
   const profile = await getCurrentProfile()
-  if (!profile || profile.role !== "ADMIN") throw new Error("Unauthorized")
+  if (!profile || profile.role === "CLIENT") throw new Error("Unauthorized")
 
   await prisma.client.update({ where: { id: clientId }, data: { active } })
   revalidatePath("/admin/clients")
@@ -72,7 +72,7 @@ export async function saveClientModal(
   formData: FormData
 ): Promise<{ error?: string; clientId?: string }> {
   const profile = await getCurrentProfile()
-  if (!profile || profile.role !== "ADMIN") return { error: "Unauthorized" }
+  if (!profile || profile.role === "CLIENT") return { error: "Unauthorized" }
 
   const parsed = ClientSchema.safeParse(Object.fromEntries(formData))
   if (!parsed.success) {

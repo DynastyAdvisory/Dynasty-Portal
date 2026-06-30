@@ -33,6 +33,33 @@ const fmt = (n: number) => n !== 0 ? n.toLocaleString("en-CA", { minimumFraction
 export default function PLClient({ sections, monthlyGrossProfit, monthlyNetIncome, totalGrossProfit, totalNetIncome }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
+  function downloadCSV() {
+    const rows: (string | number)[][] = []
+    rows.push(["Account", ...MONTHS, "Total"])
+    for (const s of sections) {
+      rows.push([s.label])
+      for (const row of s.rows) {
+        if (row.type === "SUBSECTION") { rows.push(["", row.label]); continue }
+        if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
+          rows.push(["", row.label, ...row.monthVals, row.rowTotal])
+        } else if (row.type === "ACCOUNT") {
+          rows.push([`${row.code ?? ""} ${row.label}`.trim(), ...row.monthVals, row.rowTotal])
+        }
+      }
+      rows.push(["Total " + s.label, ...s.monthTotals, s.sectionTotal])
+      if (s.key === "COGS") rows.push(["Gross Profit", ...monthlyGrossProfit, totalGrossProfit])
+      rows.push([])
+    }
+    rows.push(["Net Income / (Loss)", ...monthlyNetIncome, totalNetIncome])
+    const csv = rows.map((r) => r.map((c) => {
+      const s = String(c); return s.includes(",") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s
+    }).join(",")).join("\n")
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a"); a.href = url; a.download = "profit-loss.csv"; a.click()
+    URL.revokeObjectURL(url)
+  }
+
   function toggle(key: string) {
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -46,6 +73,10 @@ export default function PLClient({ sections, monthlyGrossProfit, monthlyNetIncom
 
   return (
     <div className="overflow-x-auto">
+      <div className="flex gap-2 mb-3 no-print">
+        <button onClick={downloadCSV} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900 transition-colors">Export CSV</button>
+        <button onClick={() => window.print()} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900 transition-colors">Print / PDF</button>
+      </div>
       <table className="w-full text-xs border-collapse min-w-[900px]">
         <thead className="sticky top-0 z-10 bg-white">
           <tr>

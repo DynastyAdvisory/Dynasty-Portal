@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useActionState, useTransition } from "react"
+import { useState, useActionState, useTransition, useRef } from "react"
 import Link from "next/link"
 import { saveClientModal, toggleClientActive } from "@/app/actions/clients"
 import { TAX_TYPES, INDUSTRY_FILTERS } from "@/lib/accounts"
@@ -15,6 +15,7 @@ function ClientModal({ client, onClose }: { client?: Client; onClose: () => void
   const clientId = client?.id ?? null
   const boundAction = (prev: ModalState, fd: FormData) => saveClientModal(clientId, prev, fd)
   const [state, formAction, pending] = useActionState(boundAction, undefined)
+  const [industryVal, setIndustryVal] = useState(client?.industry ?? "")
 
   if (state && !state.error && state.clientId) {
     onClose()
@@ -40,11 +41,28 @@ function ClientModal({ client, onClose }: { client?: Client; onClose: () => void
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Industry</label>
-              <select name="industry" defaultValue={client?.industry ?? ""}
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="">— Select —</option>
-                {INDUSTRY_FILTERS.map((f) => <option key={f} value={f}>{f}</option>)}
-              </select>
+              <datalist id="industry-list">
+                {INDUSTRY_FILTERS.map((f) => <option key={f} value={f} />)}
+              </datalist>
+              <div className="relative">
+                <input
+                  name="industry"
+                  list="industry-list"
+                  value={industryVal}
+                  onChange={(e) => setIndustryVal(e.target.value)}
+                  className="w-full px-3 py-2.5 pr-8 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Type or pick…"
+                />
+                {industryVal && (
+                  <button
+                    type="button"
+                    onClick={() => setIndustryVal("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Fiscal Year End</label>
@@ -127,7 +145,7 @@ function ArchiveButton({ client }: { client: Client }) {
   )
 }
 
-export default function FinancialsClientList({ clients, isAdmin }: { clients: Client[]; isAdmin: boolean }) {
+export default function FinancialsClientList({ clients, canManage }: { clients: Client[]; canManage: boolean }) {
   const [modal, setModal] = useState<"new" | Client | null>(null)
   const [showArchive, setShowArchive] = useState(false)
 
@@ -140,7 +158,7 @@ export default function FinancialsClientList({ clients, isAdmin }: { clients: Cl
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold text-gray-900">Clients</h1>
-          {isAdmin && archivedClients.length > 0 && (
+          {canManage && archivedClients.length > 0 && (
             <button
               onClick={() => setShowArchive((v) => !v)}
               className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-semibold border transition-colors ${
@@ -154,7 +172,7 @@ export default function FinancialsClientList({ clients, isAdmin }: { clients: Cl
             </button>
           )}
         </div>
-        {isAdmin && !showArchive && (
+        {canManage && !showArchive && (
           <button
             onClick={() => setModal("new")}
             className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
@@ -171,7 +189,7 @@ export default function FinancialsClientList({ clients, isAdmin }: { clients: Cl
           ) : (
             <>
               <p className="text-base text-gray-500 mb-4">No clients yet.</p>
-              {isAdmin && (
+              {canManage && (
                 <button onClick={() => setModal("new")} className="text-sm text-blue-600 hover:text-blue-800 font-semibold">
                   + Add your first client
                 </button>
@@ -192,7 +210,7 @@ export default function FinancialsClientList({ clients, isAdmin }: { clients: Cl
                   <p className="text-sm text-gray-600 mt-0.5">{client.industry ?? "—"} · {client.taxType.replace(/_/g, " ")}</p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0 ml-4">
-                  {isAdmin && (
+                  {canManage && (
                     <>
                       <ArchiveButton client={client} />
                       <button
