@@ -54,6 +54,7 @@ export default async function ClientFinancialsLayout({
       activeFiscalYearId={openYear.id}
       userName={profile.name ?? profile.email}
       userEmail={profile.email}
+      userRole={profile.role}
       isAdmin={profile.role === "ADMIN" || profile.role === "ACCOUNTANT"}
     >
       {children}

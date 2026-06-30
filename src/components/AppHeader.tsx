@@ -57,7 +57,7 @@ export default function AppHeader({ userName, userEmail, userRole, activePath }:
             Financials
           </Link>
 
-          {isAdmin && (
+          {isStaff && (
             <>
               <span className="text-gray-300 px-1 select-none">|</span>
               <Link
@@ -70,16 +70,18 @@ export default function AppHeader({ userName, userEmail, userRole, activePath }:
               >
                 Users
               </Link>
-              <Link
-                href="/settings/audit-log"
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  activePath === "audit-log"
-                    ? "bg-purple-100 text-purple-800"
-                    : "text-purple-700 hover:bg-purple-50 hover:text-purple-900"
-                }`}
-              >
-                Audit Log
-              </Link>
+              {isAdmin && (
+                <Link
+                  href="/settings/audit-log"
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    activePath === "audit-log"
+                      ? "bg-purple-100 text-purple-800"
+                      : "text-purple-700 hover:bg-purple-50 hover:text-purple-900"
+                  }`}
+                >
+                  Audit Log
+                </Link>
+              )}
             </>
           )}
         </nav>
@@ -88,7 +90,18 @@ export default function AppHeader({ userName, userEmail, userRole, activePath }:
       {/* Right: user info + settings dropdown */}
       <div className="flex items-center gap-4">
         <div className="text-right hidden sm:block">
-          {userName && <p className="text-sm font-semibold text-gray-900 leading-tight">{userName}</p>}
+          <div className="flex items-center justify-end gap-2">
+            {userName && <p className="text-sm font-semibold text-gray-900 leading-tight">{userName}</p>}
+            {userRole && userRole !== "CLIENT" && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold leading-none ${
+                userRole === "ADMIN" ? "bg-purple-100 text-purple-700" :
+                userRole === "ACCOUNTANT" ? "bg-blue-100 text-blue-700" :
+                "bg-teal-100 text-teal-700"
+              }`}>
+                {userRole === "ACCOUNTANT" ? "Accountant" : userRole === "BOOKKEEPER" ? "Bookkeeper" : "Admin"}
+              </span>
+            )}
+          </div>
           {userEmail && <p className="text-xs text-gray-400 leading-tight">{userEmail}</p>}
         </div>
 

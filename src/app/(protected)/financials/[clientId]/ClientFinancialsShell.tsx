@@ -15,11 +15,12 @@ interface Props {
   activeFiscalYearId: string
   userName?: string
   userEmail?: string
+  userRole?: string
   isAdmin: boolean
   children: React.ReactNode
 }
 
-function ShellInner({ clientId, clientName, fiscalYears: initialFYs, activeFiscalYearId, userName, userEmail, isAdmin, children }: Props) {
+function ShellInner({ clientId, clientName, fiscalYears: initialFYs, activeFiscalYearId, userName, userEmail, userRole, isAdmin, children }: Props) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -137,7 +138,18 @@ function ShellInner({ clientId, clientName, fiscalYears: initialFYs, activeFisca
           </div>
 
           <div className="hidden sm:block text-right">
-            {userName && <p className="text-sm font-semibold text-gray-900 leading-tight">{userName}</p>}
+            <div className="flex items-center justify-end gap-2">
+              {userName && <p className="text-sm font-semibold text-gray-900 leading-tight">{userName}</p>}
+              {userRole && userRole !== "CLIENT" && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold leading-none ${
+                  userRole === "ADMIN" ? "bg-purple-100 text-purple-700" :
+                  userRole === "ACCOUNTANT" ? "bg-blue-100 text-blue-700" :
+                  "bg-teal-100 text-teal-700"
+                }`}>
+                  {userRole === "ACCOUNTANT" ? "Accountant" : userRole === "BOOKKEEPER" ? "Bookkeeper" : "Admin"}
+                </span>
+              )}
+            </div>
             {userEmail && <p className="text-xs text-gray-400 leading-tight">{userEmail}</p>}
           </div>
 
