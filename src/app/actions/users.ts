@@ -13,17 +13,11 @@ function getAdminClient() {
   return createSupabaseClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
 }
 
-function generateTempPassword(length = 12) {
-  const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-  const bytes = new Uint8Array(length)
-  crypto.getRandomValues(bytes)
-  return Array.from(bytes).map((b) => chars[b % chars.length]).join("")
-}
-
 const InviteSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
   role: z.enum(["ADMIN", "ACCOUNTANT", "BOOKKEEPER", "CLIENT"]),
+  password: z.string().min(8, "Password must be at least 8 characters"),
 })
 
 export async function inviteUser(formData: FormData) {
@@ -37,7 +31,7 @@ export async function inviteUser(formData: FormData) {
   const parsed = InviteSchema.safeParse(Object.fromEntries(formData))
   if (!parsed.success) return { error: parsed.error.flatten().fieldErrors }
 
-  const { email, name, role } = parsed.data
+  const { email, name, role, password } = parsed.data
 
   if (!canInviteStaff && role !== "CLIENT") {
     return { error: { role: ["You can only invite client users"] } }
@@ -47,11 +41,10 @@ export async function inviteUser(formData: FormData) {
   const singleClientId = formData.get("clientId") as string | null
 
   const supabaseAdmin = getAdminClient()
-  const tempPassword = generateTempPassword()
 
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
     email,
-    password: tempPassword,
+    password,
     email_confirm: true,
   })
   if (error) return { error: { _form: [error.message] } }
@@ -75,7 +68,7 @@ export async function inviteUser(formData: FormData) {
 
   revalidatePath("/admin/users")
   revalidatePath("/users")
-  return { success: true, tempPassword, name }
+  return { success: true, tempPassword: password, name }
 }
 
 export async function updateUserRole(profileId: string, role: "ADMIN" | "ACCOUNTANT" | "BOOKKEEPER" | "CLIENT") {

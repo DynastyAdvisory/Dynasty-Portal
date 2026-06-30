@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { inviteUser } from "@/app/actions/users"
-import { X, Copy, Check } from "lucide-react"
+import { X, Copy, Check, Eye, EyeOff } from "lucide-react"
 import type { Client } from "@/generated/prisma/client"
 
 interface Props {
@@ -17,6 +17,7 @@ export default function InviteUserModal({ clients, onClose, currentUserRole = "A
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ tempPassword: string; name: string } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [showPw, setShowPw] = useState(false)
 
   const isStaffInviter = currentUserRole === "ACCOUNTANT" || currentUserRole === "BOOKKEEPER"
   const allowedRoles = isStaffInviter
@@ -102,6 +103,27 @@ export default function InviteUserModal({ clients, onClose, currentUserRole = "A
               <input name="name" required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Full name" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Temporary Password *</label>
+              <div className="relative">
+                <input
+                  name="password"
+                  type={showPw ? "text" : "password"}
+                  required
+                  minLength={8}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
+                  placeholder="Min. 8 characters"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">The user will log in with this password and can change it later.</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Role *</label>

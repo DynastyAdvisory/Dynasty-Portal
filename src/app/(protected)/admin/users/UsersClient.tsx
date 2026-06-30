@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
-import { updateUserRole, removeUserFromClient, deleteUser } from "@/app/actions/users"
+import { useState, useTransition } from "react"
+import { updateUserRole, assignUserToClient, removeUserFromClient, deleteUser } from "@/app/actions/users"
 import InviteUserModal from "./InviteUserModal"
+import { ChevronDown, ChevronRight, X, Plus, Trash2 } from "lucide-react"
 import type { Profile, Client, ClientAssignment } from "@/generated/prisma/client"
 
 type ProfileWithRelations = Profile & {
@@ -15,6 +16,125 @@ const ROLE_COLORS = {
   ACCOUNTANT: "bg-blue-50 text-blue-700",
   BOOKKEEPER: "bg-teal-50 text-teal-700",
   CLIENT: "bg-gray-100 text-gray-600",
+}
+
+function UserRow({ profile, clients }: { profile: ProfileWithRelations; clients: Client[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const [, startTransition] = useTransition()
+  const [addClientId, setAddClientId] = useState("")
+
+  const assignedIds = new Set(profile.assignments.map((a) => a.clientId))
+  const unassignedClients = clients.filter((c) => !assignedIds.has(c.id))
+
+  function handleAssign() {
+    if (!addClientId) return
+    startTransition(async () => { await assignUserToClient(profile.id, addClientId) })
+    setAddClientId("")
+  }
+
+  return (
+    <div className="border-b border-gray-100 last:border-0">
+      <div className="px-5 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setExpanded((v) => !v)}
+                className="flex items-center gap-1.5 text-sm font-medium text-gray-900 hover:text-blue-700 transition-colors"
+              >
+                {expanded ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+                {profile.name ?? profile.email}
+              </button>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLORS[profile.role]}`}>
+                {profile.role}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5 ml-5">{profile.email}</p>
+
+            {/* Assigned clients summary (collapsed view) */}
+            {!expanded && (profile.role === "ACCOUNTANT" || profile.role === "BOOKKEEPER") && (
+              <div className="ml-5 mt-1 flex flex-wrap gap-1">
+                {profile.assignments.length === 0
+                  ? <span className="text-xs text-gray-400">No clients assigned</span>
+                  : profile.assignments.map((a) => (
+                    <span key={a.clientId} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                      {a.client.name}
+                    </span>
+                  ))}
+              </div>
+            )}
+            {!expanded && profile.role === "CLIENT" && profile.client && (
+              <p className="text-xs text-gray-500 mt-0.5 ml-5">Company: {profile.client.name}</p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <select
+              defaultValue={profile.role}
+              onChange={(e) => startTransition(() => updateUserRole(profile.id, e.target.value as Profile["role"]))}
+              className="text-xs border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              <option value="ADMIN">Admin</option>
+              <option value="ACCOUNTANT">Accountant</option>
+              <option value="BOOKKEEPER">Bookkeeper</option>
+              <option value="CLIENT">Client</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded edit panel */}
+      {expanded && (profile.role === "ACCOUNTANT" || profile.role === "BOOKKEEPER") && (
+        <div className="mx-5 mb-4 bg-gray-50 rounded-xl border border-gray-200 p-4 space-y-3">
+          <p className="text-xs font-semibold text-gray-700">Client Assignments</p>
+
+          {/* Current assignments */}
+          <div className="space-y-1.5">
+            {profile.assignments.length === 0
+              ? <p className="text-xs text-gray-400">No clients assigned yet.</p>
+              : profile.assignments.map((a) => (
+                <div key={a.clientId} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                  <span className="text-sm text-gray-800">{a.client.name}</span>
+                  <button
+                    onClick={() => startTransition(async () => { await removeUserFromClient(profile.id, a.clientId) })}
+                    className="text-gray-300 hover:text-red-500 transition-colors"
+                    title="Remove from client"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+          </div>
+
+          {/* Add new client */}
+          {unassignedClients.length > 0 && (
+            <div className="flex items-center gap-2">
+              <select
+                value={addClientId}
+                onChange={(e) => setAddClientId(e.target.value)}
+                className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+              >
+                <option value="">— Add a client —</option>
+                {unassignedClients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleAssign}
+                disabled={!addClientId}
+                className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+          {unassignedClients.length === 0 && profile.assignments.length > 0 && (
+            <p className="text-xs text-gray-400">All clients are assigned.</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function UsersClient({ profiles, clients }: { profiles: ProfileWithRelations[]; clients: Client[] }) {
@@ -41,8 +161,10 @@ export default function UsersClient({ profiles, clients }: { profiles: ProfileWi
             ))}
           </div>
         </div>
-        <button onClick={() => setShowInvite(true)}
-          className="px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
+        <button
+          onClick={() => setShowInvite(true)}
+          className="px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+        >
           + Invite User
         </button>
       </div>
@@ -52,38 +174,7 @@ export default function UsersClient({ profiles, clients }: { profiles: ProfileWi
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
           {shown.map((profile) => (
-            <div key={profile.id} className="px-5 py-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-medium text-gray-900">{profile.name ?? profile.email}</p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLORS[profile.role]}`}>
-                      {profile.role}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-0.5">{profile.email}</p>
-                  {profile.role === "CLIENT" && profile.client && (
-                    <p className="text-xs text-gray-500 mt-1">Client: {profile.client.name}</p>
-                  )}
-                  {(profile.role === "ACCOUNTANT" || profile.role === "BOOKKEEPER") && profile.assignments.length > 0 && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Assigned: {profile.assignments.map((a) => a.client.name).join(", ")}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <select defaultValue={profile.role}
-                    onChange={(e) => updateUserRole(profile.id, e.target.value as Profile["role"])}
-                    className="text-xs border border-gray-200 rounded px-2 py-1 bg-white">
-                    <option value="ADMIN">Admin</option>
-                    <option value="ACCOUNTANT">Accountant</option>
-                    <option value="BOOKKEEPER">Bookkeeper</option>
-                    <option value="CLIENT">Client</option>
-                  </select>
-                </div>
-              </div>
-            </div>
+            <UserRow key={profile.id} profile={profile} clients={clients} />
           ))}
         </div>
       )}
