@@ -1,102 +1,138 @@
 "use client"
 
-import { useCallback, useOptimistic, useTransition } from "react"
+import { useTransition } from "react"
 import { saveMonthlyEntry, lockPeriod, unlockPeriod } from "@/app/actions/entries"
 import { REVENUE_ROWS, COGS_ROWS, EXPENSE_ROWS, MONTHS, type AccountRow } from "@/lib/accounts"
 import { Lock, Unlock } from "lucide-react"
 
-interface Entry {
-  accountCode: string
-  month: number
-  grossAmount: string | number
-}
-
-interface PeriodLock {
-  month: number
-  unlockedAt: Date | null
-  lockedAt: Date
-}
+interface TaxCodeOption { id: string; name: string; rate: number; isDefault: boolean }
+interface AccountConfigOption { accountCode: string; isHidden: boolean; taxCodeId: string | null }
+interface CustomAccountOption { code: string; name: string; section: string; subsection?: string }
 
 interface Props {
   clientId: string
   fiscalYearId: string
-  taxRate: number
-  entries: Entry[]
-  locks: PeriodLock[]
-  isAdmin: boolean
+  defaultTaxRate: number
+  entries: { accountCode: string; month: number; grossAmount: string | number }[]
+  locks: { month: number; lockedAt: Date; unlockedAt: Date | null }[]
+  taxCodes: TaxCodeOption[]
+  accountConfigs: AccountConfigOption[]
+  customAccounts: CustomAccountOption[]
+  isStaff: boolean
 }
 
-function isLocked(locks: PeriodLock[], month: number): boolean {
-  const lock = locks.find((l) => l.month === month)
-  return !!lock && !lock.unlockedAt
+function isMonthLocked(locks: Props["locks"], month: number) {
+  const l = locks.find((x) => x.month === month)
+  return !!l && !l.unlockedAt
 }
 
-function formatNumber(val: string | number | undefined): string {
-  if (!val || val === 0 || val === "0") return ""
-  const num = typeof val === "string" ? parseFloat(val) : val
-  if (isNaN(num) || num === 0) return ""
-  return num.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+function fmt(n: number) {
+  if (n === 0) return ""
+  return n.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function parseInput(val: string): number {
-  return parseFloat(val.replace(/,/g, "")) || 0
-}
+function parseInput(v: string) { return parseFloat(v.replace(/,/g, "")) || 0 }
 
-export default function MonthlyEntryClient({ clientId, fiscalYearId, taxRate, entries, locks, isAdmin }: Props) {
+export default function MonthlyEntryClient({
+  clientId, fiscalYearId, defaultTaxRate, entries, locks, taxCodes, accountConfigs, customAccounts, isStaff,
+}: Props) {
+  const [, startTransition] = useTransition()
+
   const entryMap: Record<string, number> = {}
   for (const e of entries) {
-    entryMap[`${e.accountCode}-${e.month}`] = typeof e.grossAmount === "string" ? parseFloat(e.grossAmount) : e.grossAmount
+    entryMap[`${e.accountCode}-${e.month}`] = parseFloat(String(e.grossAmount))
   }
 
-  const [isPending, startTransition] = useTransition()
+  const hiddenSet = new Set(accountConfigs.filter((c) => c.isHidden).map((c) => c.accountCode))
+  const taxCodeMap = new Map(accountConfigs.filter((c) => c.taxCodeId).map((c) => [c.accountCode, c.taxCodeId!]))
+  const taxCodeById = new Map(taxCodes.map((t) => [t.id, t]))
+  const defaultTaxCode = taxCodes.find((t) => t.isDefault)
 
-  function handleBlur(accountCode: string, month: number, e: React.FocusEvent<HTMLInputElement>) {
-    const raw = parseInput(e.target.value)
-    const prev = entryMap[`${accountCode}-${month}`] ?? 0
-    if (raw === prev) return
-    startTransition(async () => {
-      await saveMonthlyEntry(clientId, fiscalYearId, accountCode, month, raw)
+  function getRate(code: string) {
+    const tcId = taxCodeMap.get(code)
+    if (tcId) return taxCodeById.get(tcId)?.rate ?? defaultTaxRate
+    return defaultTaxCode?.rate ?? defaultTaxRate
+  }
+
+  function getTaxCodeIdForAccount(code: string) {
+    return taxCodeMap.get(code) ?? (defaultTaxCode?.id ?? "")
+  }
+
+  // Build full rows: standard (filtered) + custom injected by section
+  function buildRows(standardRows: AccountRow[], section: string) {
+    const rows: (AccountRow | { type: "ACCOUNT"; code: string; label: string; isCustom: true })[] = []
+    for (const row of standardRows) {
+      if (row.type === "ACCOUNT" && row.code && hiddenSet.has(row.code)) continue
+      rows.push(row)
+      // Inject custom accounts after last standard account in their subsection
+      if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
+        // handled below
+      }
+    }
+    return rows
+  }
+
+  const customBySection: Record<string, CustomAccountOption[]> = {}
+  for (const ca of customAccounts) {
+    if (!customBySection[ca.section]) customBySection[ca.section] = []
+    customBySection[ca.section].push(ca)
+  }
+
+  function handleBlur(code: string, month: number, e: React.FocusEvent<HTMLInputElement>) {
+    const val = parseInput(e.target.value)
+    const prev = entryMap[`${code}-${month}`] ?? 0
+    if (val === prev) return
+    startTransition(async () => { await saveMonthlyEntry(clientId, fiscalYearId, code, month, val) })
+  }
+
+  function handleTaxCodeChange(code: string, taxCodeId: string) {
+    // Update via accountconfig action — optimistic update not needed, page will revalidate
+    import("@/app/actions/accountconfig").then(({ setAccountTaxCode }) => {
+      startTransition(async () => { await setAccountTaxCode(clientId, code, taxCodeId || null) })
     })
   }
 
-  function handleLock(month: number) {
-    startTransition(async () => {
-      await lockPeriod(clientId, fiscalYearId, month)
-    })
-  }
+  const hasTaxCodes = taxCodes.length > 0
+  const colSpan = hasTaxCodes ? 15 : 14
 
-  function handleUnlock(month: number) {
-    const note = window.prompt("Reason for unlocking this period (required):") ?? ""
-    if (!note.trim()) return
-    startTransition(async () => {
-      await unlockPeriod(clientId, fiscalYearId, month, note)
-    })
-  }
-
-  const allRows = [...REVENUE_ROWS, ...COGS_ROWS, ...EXPENSE_ROWS]
+  const allSections = [
+    { rows: REVENUE_ROWS, key: "REVENUE" },
+    { rows: COGS_ROWS, key: "COGS" },
+    { rows: EXPENSE_ROWS, key: "EXPENSE" },
+  ]
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-xs border-collapse min-w-[900px]">
+      <table className="w-full text-xs border-collapse" style={{ minWidth: hasTaxCodes ? "1100px" : "900px" }}>
         <thead className="sticky top-0 z-10 bg-white">
           <tr>
             <th className="text-left font-semibold text-gray-700 px-4 py-3 w-52 border-b border-gray-200">Account</th>
+            {hasTaxCodes && (
+              <th className="text-left font-semibold text-gray-700 px-2 py-3 w-36 border-b border-gray-200">Tax</th>
+            )}
             {MONTHS.map((m, i) => {
-              const locked = isLocked(locks, i + 1)
+              const locked = isMonthLocked(locks, i + 1)
               return (
-                <th key={m} className="text-center font-semibold text-gray-700 px-1.5 py-3 border-b border-gray-200 min-w-[80px]">
+                <th key={m} className="text-center font-semibold text-gray-700 px-1.5 py-3 border-b border-gray-200 min-w-[72px]">
                   <div className="flex flex-col items-center gap-0.5">
                     <span>{m}</span>
-                    {isAdmin && (
+                    {isStaff && (
                       <button
-                        onClick={() => locked ? handleUnlock(i + 1) : handleLock(i + 1)}
+                        onClick={() => startTransition(async () => {
+                          if (locked) {
+                            const note = window.prompt("Reason for unlocking:") ?? ""
+                            if (note.trim()) await unlockPeriod(clientId, fiscalYearId, i + 1, note)
+                          } else {
+                            await lockPeriod(clientId, fiscalYearId, i + 1)
+                          }
+                        })}
                         className={`p-0.5 rounded transition-colors ${locked ? "text-amber-500 hover:text-amber-700" : "text-gray-300 hover:text-gray-500"}`}
-                        title={locked ? "Click to unlock" : "Lock period"}
+                        title={locked ? "Unlock period" : "Lock period"}
                       >
                         {locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
                       </button>
                     )}
-                    {!isAdmin && locked && <Lock className="w-3 h-3 text-amber-400" />}
+                    {!isStaff && locked && <Lock className="w-3 h-3 text-amber-400" />}
                   </div>
                 </th>
               )
@@ -105,117 +141,118 @@ export default function MonthlyEntryClient({ clientId, fiscalYearId, taxRate, en
           </tr>
         </thead>
         <tbody>
-          {allRows.map((row, idx) => {
-            if (row.type === "SECTION") {
-              return (
-                <tr key={idx} className="bg-gray-50">
-                  <td colSpan={14} className="px-4 py-2 text-xs font-bold text-gray-700 uppercase tracking-wide border-b border-gray-200">
-                    {row.label}
-                  </td>
-                </tr>
-              )
-            }
-            if (row.type === "SUBSECTION") {
-              return (
-                <tr key={idx} className="bg-gray-50">
-                  <td colSpan={14} className="px-4 py-1.5 text-xs font-semibold text-gray-500 italic border-b border-gray-100">
-                    {row.label}
-                  </td>
-                </tr>
-              )
-            }
-            if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
-              // Calculate subtotal/total for the rows above
-              return (
-                <TotalsRow key={idx} label={row.label} type={row.type} allRows={allRows.slice(0, idx)} entryMap={entryMap} taxRate={taxRate} />
-              )
+          {allSections.map(({ rows, key }) => {
+            const sectionCustom = customBySection[key] ?? []
+            const allRows = [...rows]
+            // Insert custom accounts before the TOTAL row of the section
+            const totalIdx = allRows.findIndex((r) => r.type === "TOTAL")
+            if (sectionCustom.length > 0 && totalIdx > -1) {
+              const customRows: AccountRow[] = sectionCustom.map((ca) => ({
+                type: "ACCOUNT" as const,
+                label: ca.name,
+                code: ca.code,
+              }))
+              allRows.splice(totalIdx, 0, ...customRows)
             }
 
-            // ACCOUNT row
-            const code = row.code!
-            let rowTotal = 0
-            const monthValues: number[] = []
-            for (let m = 1; m <= 12; m++) {
-              const v = entryMap[`${code}-${m}`] ?? 0
-              monthValues.push(v)
-              rowTotal += v
-            }
-
-            return (
-              <tr key={idx} className="hover:bg-blue-50/30 group border-b border-gray-100">
-                <td className="px-4 py-1.5 text-gray-700 whitespace-nowrap">
-                  <span className="text-gray-400 mr-1.5">{code}</span>
-                  {row.label}
-                </td>
-                {monthValues.map((val, mi) => {
-                  const locked = isLocked(locks, mi + 1)
-                  return (
-                    <td key={mi} className={`px-1 py-1 ${locked ? "bg-amber-50" : ""}`}>
-                      <input
-                        defaultValue={val > 0 ? formatNumber(val) : ""}
-                        onBlur={(e) => handleBlur(code, mi + 1, e)}
-                        disabled={locked}
-                        className={`w-full text-right text-xs px-1.5 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 ${
-                          locked ? "bg-amber-50 text-gray-400 cursor-not-allowed" : "bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-gray-300"
-                        }`}
-                        placeholder=""
-                      />
+            return allRows.map((row, idx) => {
+              if (row.type === "SECTION") {
+                return (
+                  <tr key={`${key}-section-${idx}`} className="bg-gray-50">
+                    <td colSpan={colSpan} className="px-4 py-2 text-xs font-bold text-gray-700 uppercase tracking-wide border-b border-gray-200">
+                      {row.label}
                     </td>
-                  )
-                })}
-                <td className="px-4 py-1.5 text-right text-gray-900 font-medium tabular-nums">
-                  {rowTotal !== 0 ? formatNumber(rowTotal) : ""}
-                </td>
-              </tr>
-            )
+                  </tr>
+                )
+              }
+              if (row.type === "SUBSECTION") {
+                return (
+                  <tr key={`${key}-sub-${idx}`} className="bg-gray-50">
+                    <td colSpan={colSpan} className="px-4 py-1.5 text-xs font-semibold text-gray-500 italic border-b border-gray-100">
+                      {row.label}
+                    </td>
+                  </tr>
+                )
+              }
+              if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
+                // Sum account rows since last break
+                let startI = 0
+                for (let j = idx - 1; j >= 0; j--) {
+                  const t = allRows[j].type
+                  if (t === "SUBTOTAL" || t === "TOTAL" || t === "SECTION" || t === "SUBSECTION") { startI = j + 1; break }
+                }
+                const accRows = allRows.slice(startI, idx).filter((r) => r.type === "ACCOUNT" && r.code && !hiddenSet.has(r.code!))
+                const monthTotals = Array.from({ length: 12 }, (_, mi) =>
+                  accRows.reduce((s, r) => s + (entryMap[`${r.code}-${mi + 1}`] ?? 0), 0)
+                )
+                const grandTotal = monthTotals.reduce((a, b) => a + b, 0)
+                const isBold = row.type === "TOTAL"
+                return (
+                  <tr key={`${key}-total-${idx}`} className={`${isBold ? "bg-gray-100 font-bold" : "bg-gray-50 font-semibold"} border-t border-gray-300`}>
+                    <td colSpan={hasTaxCodes ? 2 : 1} className={`px-4 py-2 text-gray-800 text-xs ${isBold ? "uppercase tracking-wide" : ""}`}>{row.label}</td>
+                    {monthTotals.map((v, mi) => (
+                      <td key={mi} className="px-1.5 py-2 text-right text-gray-800 tabular-nums text-xs">
+                        {v !== 0 ? fmt(v) : ""}
+                      </td>
+                    ))}
+                    <td className="px-4 py-2 text-right text-gray-900 tabular-nums text-xs">{grandTotal !== 0 ? fmt(grandTotal) : ""}</td>
+                  </tr>
+                )
+              }
+
+              // ACCOUNT row
+              const code = row.code!
+              if (hiddenSet.has(code)) return null
+
+              const monthVals = Array.from({ length: 12 }, (_, mi) => entryMap[`${code}-${mi + 1}`] ?? 0)
+              const rowTotal = monthVals.reduce((a, b) => a + b, 0)
+              const currentTaxCodeId = getTaxCodeIdForAccount(code)
+
+              return (
+                <tr key={`${key}-acc-${code}`} className="hover:bg-blue-50/30 border-b border-gray-100">
+                  <td className="px-4 py-1.5 text-gray-700 whitespace-nowrap">
+                    <span className="text-gray-400 mr-1.5">{code}</span>
+                    {row.label}
+                  </td>
+                  {hasTaxCodes && (
+                    <td className="px-2 py-1">
+                      <select
+                        value={currentTaxCodeId}
+                        onChange={(e) => handleTaxCodeChange(code, e.target.value)}
+                        className="w-full text-xs px-1.5 py-1 border border-gray-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      >
+                        {taxCodes.map((tc) => (
+                          <option key={tc.id} value={tc.id}>
+                            {tc.name}{tc.isDefault ? " ★" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
+                  {monthVals.map((val, mi) => {
+                    const locked = isMonthLocked(locks, mi + 1)
+                    return (
+                      <td key={mi} className={`px-1 py-1 ${locked ? "bg-amber-50" : ""}`}>
+                        <input
+                          defaultValue={val > 0 ? fmt(val) : ""}
+                          onBlur={(e) => handleBlur(code, mi + 1, e)}
+                          disabled={locked}
+                          className={`w-full text-right text-xs px-1.5 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 ${
+                            locked ? "bg-amber-50 text-gray-400 cursor-not-allowed" : "bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-gray-300"
+                          }`}
+                        />
+                      </td>
+                    )
+                  })}
+                  <td className="px-4 py-1.5 text-right text-gray-900 font-medium tabular-nums">
+                    {rowTotal !== 0 ? fmt(rowTotal) : ""}
+                  </td>
+                </tr>
+              )
+            })
           })}
         </tbody>
       </table>
     </div>
-  )
-}
-
-// ─── Totals row ──────────────────────────────────────────────────────────────
-
-function TotalsRow({ label, type, allRows, entryMap, taxRate }: {
-  label: string
-  type: "SUBTOTAL" | "TOTAL"
-  allRows: AccountRow[]
-  entryMap: Record<string, number>
-  taxRate: number
-}) {
-  // Sum account rows since the last subtotal/total/section/subsection
-  let startIdx = allRows.length - 1
-  for (let i = allRows.length - 1; i >= 0; i--) {
-    if (allRows[i].type === "SUBTOTAL" || allRows[i].type === "TOTAL" || allRows[i].type === "SECTION" || allRows[i].type === "SUBSECTION") {
-      startIdx = i + 1
-      break
-    }
-    if (i === 0) startIdx = 0
-  }
-  const accountRows = allRows.slice(startIdx).filter((r) => r.type === "ACCOUNT" && r.code)
-
-  const monthTotals: number[] = Array(12).fill(0)
-  for (const r of accountRows) {
-    for (let m = 1; m <= 12; m++) {
-      monthTotals[m - 1] += entryMap[`${r.code}-${m}`] ?? 0
-    }
-  }
-  const grandTotal = monthTotals.reduce((a, b) => a + b, 0)
-
-  const isGrandTotal = type === "TOTAL"
-
-  return (
-    <tr className={`${isGrandTotal ? "bg-gray-100 font-bold" : "bg-gray-50 font-semibold"} border-t border-gray-300`}>
-      <td className={`px-4 py-2 text-gray-800 text-xs ${isGrandTotal ? "uppercase tracking-wide" : ""}`}>{label}</td>
-      {monthTotals.map((v, mi) => (
-        <td key={mi} className="px-1.5 py-2 text-right text-gray-800 tabular-nums text-xs">
-          {v !== 0 ? v.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}
-        </td>
-      ))}
-      <td className="px-4 py-2 text-right text-gray-900 tabular-nums text-xs">
-        {grandTotal !== 0 ? grandTotal.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}
-      </td>
-    </tr>
   )
 }

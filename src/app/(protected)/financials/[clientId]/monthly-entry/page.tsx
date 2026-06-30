@@ -19,7 +19,6 @@ export default async function MonthlyEntryPage({
   const client = await prisma.client.findUnique({ where: { id: clientId } })
   if (!client) notFound()
 
-  // Find fiscal year
   let fiscalYear = fy
     ? await prisma.fiscalYear.findUnique({ where: { id: fy } })
     : await prisma.fiscalYear.findFirst({ where: { clientId, status: "OPEN" }, orderBy: { year: "desc" } })
@@ -33,12 +32,15 @@ export default async function MonthlyEntryPage({
     })
   }
 
-  const [entries, locks] = await Promise.all([
+  const [entries, locks, taxCodes, accountConfigs, customAccounts] = await Promise.all([
     prisma.monthlyEntry.findMany({ where: { clientId, fiscalYearId: fiscalYear.id } }),
     prisma.periodLock.findMany({ where: { clientId, fiscalYearId: fiscalYear.id } }),
+    prisma.taxCode.findMany({ where: { clientId }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
+    prisma.clientAccountConfig.findMany({ where: { clientId } }),
+    prisma.clientCustomAccount.findMany({ where: { clientId, isActive: true }, orderBy: { sortOrder: "asc" } }),
   ])
 
-  const isAdmin = profile.role === "ADMIN" || profile.role === "ACCOUNTANT" || profile.role === "BOOKKEEPER"
+  const isStaff = profile.role !== "CLIENT"
 
   return (
     <div>
@@ -51,10 +53,13 @@ export default async function MonthlyEntryPage({
       <MonthlyEntryClient
         clientId={clientId}
         fiscalYearId={fiscalYear.id}
-        taxRate={client.taxRate}
+        defaultTaxRate={client.taxRate}
         entries={entries.map((e) => ({ accountCode: e.accountCode, month: e.month, grossAmount: e.grossAmount.toString() }))}
         locks={locks.map((l) => ({ month: l.month, lockedAt: l.lockedAt, unlockedAt: l.unlockedAt }))}
-        isAdmin={isAdmin}
+        taxCodes={taxCodes.map((t) => ({ id: t.id, name: t.name, rate: t.rate, isDefault: t.isDefault }))}
+        accountConfigs={accountConfigs.map((c) => ({ accountCode: c.accountCode, isHidden: c.isHidden, taxCodeId: c.taxCodeId }))}
+        customAccounts={customAccounts.map((c) => ({ code: c.code, name: c.name, section: c.section, subsection: c.subsection ?? undefined }))}
+        isStaff={isStaff}
       />
     </div>
   )

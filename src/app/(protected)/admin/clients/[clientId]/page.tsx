@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma"
 import { notFound } from "next/navigation"
 import { updateClient, toggleClientActive } from "@/app/actions/clients"
 import ClientForm from "../ClientForm"
+import Link from "next/link"
 
 export default async function EditClientPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params
@@ -12,7 +13,13 @@ export default async function EditClientPage({ params }: { params: Promise<{ cli
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
-      <h1 className="text-lg font-semibold text-gray-900">Edit Client — {client.name}</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold text-gray-900">Edit Client — {client.name}</h1>
+        <Link href={`/admin/clients/${clientId}/settings`}
+          className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+          Tax & COA Settings →
+        </Link>
+      </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <ClientForm action={boundUpdate} client={client} />

@@ -22,39 +22,53 @@ export default async function GSTTrackerPage({
   const fiscalYear = fy
     ? await prisma.fiscalYear.findUnique({ where: { id: fy } })
     : await prisma.fiscalYear.findFirst({ where: { clientId, status: "OPEN" }, orderBy: { year: "desc" } })
-
   if (!fiscalYear) notFound()
 
-  const entries = await prisma.monthlyEntry.findMany({ where: { clientId, fiscalYearId: fiscalYear.id } })
+  const [entries, taxCodes, accountConfigs, customAccounts] = await Promise.all([
+    prisma.monthlyEntry.findMany({ where: { clientId, fiscalYearId: fiscalYear.id } }),
+    prisma.taxCode.findMany({ where: { clientId } }),
+    prisma.clientAccountConfig.findMany({ where: { clientId } }),
+    prisma.clientCustomAccount.findMany({ where: { clientId, isActive: true } }),
+  ])
 
   const entryMap: Record<string, number> = {}
-  for (const e of entries) {
-    entryMap[`${e.accountCode}-${e.month}`] = parseFloat(e.grossAmount.toString())
+  for (const e of entries) entryMap[`${e.accountCode}-${e.month}`] = parseFloat(e.grossAmount.toString())
+
+  const hiddenSet = new Set(accountConfigs.filter((c) => c.isHidden).map((c) => c.accountCode))
+  const taxCodeById = new Map(taxCodes.map((t) => [t.id, t]))
+  const acctTaxCodeMap = new Map(accountConfigs.filter((c) => c.taxCodeId).map((c) => [c.accountCode, c.taxCodeId!]))
+  const defaultTaxCode = taxCodes.find((t) => t.isDefault)
+  const fallbackRate = defaultTaxCode?.rate ?? client.taxRate
+
+  function getRate(code: string) {
+    const tcId = acctTaxCodeMap.get(code)
+    if (tcId) return taxCodeById.get(tcId)?.rate ?? fallbackRate
+    return fallbackRate
   }
 
-  const rate = client.taxRate
-  const extractTax = (gross: number) => gross * rate / (1 + rate)
+  function extractTax(gross: number, code: string) {
+    const r = getRate(code)
+    return r > 0 ? gross * r / (1 + r) : 0
+  }
 
-  // Build monthly GST collected (taxable revenue accounts)
-  const taxableRevRows = REVENUE_ROWS.filter((r) => r.type === "ACCOUNT" && r.code && r.taxable)
-  const itcExpRows = EXPENSE_ROWS.filter((r) => r.type === "ACCOUNT" && r.code && r.itcEligible)
+  // Taxable revenue: standard rows with taxable=true + custom revenue accounts
+  const taxableRevCodes = [
+    ...REVENUE_ROWS.filter((r) => r.type === "ACCOUNT" && r.code && r.taxable && !hiddenSet.has(r.code!)).map((r) => r.code!),
+    ...customAccounts.filter((c) => c.section === "REVENUE").map((c) => c.code),
+  ]
 
-  const monthlyCollected = MONTHS.map((_, mi) => {
-    let sum = 0
-    for (const r of taxableRevRows) {
-      sum += extractTax(entryMap[`${r.code}-${mi + 1}`] ?? 0)
-    }
-    return sum
-  })
+  // ITC eligible expense rows + custom expense accounts (assumed ITC eligible)
+  const itcExpCodes = [
+    ...EXPENSE_ROWS.filter((r) => r.type === "ACCOUNT" && r.code && r.itcEligible && !hiddenSet.has(r.code!)).map((r) => r.code!),
+    ...customAccounts.filter((c) => c.section === "EXPENSE").map((c) => c.code),
+  ]
 
-  const monthlyITC = MONTHS.map((_, mi) => {
-    let sum = 0
-    for (const r of itcExpRows) {
-      sum += extractTax(entryMap[`${r.code}-${mi + 1}`] ?? 0)
-    }
-    return sum
-  })
-
+  const monthlyCollected = MONTHS.map((_, mi) =>
+    taxableRevCodes.reduce((s, code) => s + extractTax(entryMap[`${code}-${mi + 1}`] ?? 0, code), 0)
+  )
+  const monthlyITC = MONTHS.map((_, mi) =>
+    itcExpCodes.reduce((s, code) => s + extractTax(entryMap[`${code}-${mi + 1}`] ?? 0, code), 0)
+  )
   const monthlyNet = monthlyCollected.map((c, i) => c - monthlyITC[i])
 
   const totalCollected = monthlyCollected.reduce((a, b) => a + b, 0)
@@ -63,9 +77,8 @@ export default async function GSTTrackerPage({
 
   const fmt = (n: number) => n.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-  // Determine filing quarters
   const freq = client.filingFreq
-  let quarters: { label: string; months: number[] }[] = []
+  let quarters: { label: string; months: number[] }[]
   if (freq === "Monthly") {
     quarters = MONTHS.map((m, i) => ({ label: m, months: [i + 1] }))
   } else if (freq === "Annual") {
@@ -79,22 +92,33 @@ export default async function GSTTrackerPage({
     ]
   }
 
+  // Tax code breakdown for transparency
+  const taxCodeSummary = taxCodes.map((tc) => {
+    const codes = [...taxableRevCodes.filter((c) => (acctTaxCodeMap.get(c) ?? defaultTaxCode?.id) === tc.id)]
+    let gross = 0
+    for (const code of codes) {
+      for (let m = 1; m <= 12; m++) gross += entryMap[`${code}-${m}`] ?? 0
+    }
+    const tax = gross > 0 ? gross * tc.rate / (1 + tc.rate) : 0
+    return { ...tc, gross, tax, accountCount: codes.length }
+  }).filter((t) => t.gross > 0)
+
   return (
-    <div className="p-4 max-w-4xl">
-      <div className="mb-4">
+    <div className="p-4 max-w-4xl space-y-5">
+      <div>
         <h2 className="text-sm font-semibold text-gray-900">GST/HST Tracker — FY {fiscalYear.year}</h2>
         <p className="text-xs text-gray-400 mt-0.5">
-          Tax rate: {(rate * 100).toFixed(0)}% ({client.taxType.replace("_", " ")}) · Filing: {freq}
+          Filing: {freq} · Tax rates per account assignment
         </p>
       </div>
 
       {/* Monthly breakdown */}
-      <div className="bg-white rounded-xl border border-gray-200 mb-5 overflow-x-auto">
-        <table className="w-full text-xs border-collapse min-w-[700px]">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+        <table className="w-full text-xs border-collapse min-w-[600px]">
           <thead>
             <tr className="border-b border-gray-200">
               <th className="text-left px-4 py-3 font-semibold text-gray-700">Month</th>
-              <th className="text-right px-4 py-3 font-semibold text-gray-700">GST Collected</th>
+              <th className="text-right px-4 py-3 font-semibold text-gray-700">GST/HST Collected</th>
               <th className="text-right px-4 py-3 font-semibold text-gray-700">Input Tax Credits</th>
               <th className="text-right px-4 py-3 font-semibold text-gray-700">Net Remittance</th>
             </tr>
@@ -105,19 +129,19 @@ export default async function GSTTrackerPage({
                 <td className="px-4 py-2 text-gray-700 font-medium">{m}</td>
                 <td className="px-4 py-2 text-right tabular-nums text-gray-800">{fmt(monthlyCollected[mi])}</td>
                 <td className="px-4 py-2 text-right tabular-nums text-gray-600">({fmt(monthlyITC[mi])})</td>
-                <td className={`px-4 py-2 text-right tabular-nums font-medium ${monthlyNet[mi] >= 0 ? "text-gray-900" : "text-green-700"}`}>
-                  {monthlyNet[mi] >= 0 ? fmt(monthlyNet[mi]) : `(${fmt(Math.abs(monthlyNet[mi]))})`}
+                <td className={`px-4 py-2 text-right tabular-nums font-medium ${monthlyNet[mi] < 0 ? "text-green-700" : "text-gray-900"}`}>
+                  {monthlyNet[mi] < 0 ? `(${fmt(Math.abs(monthlyNet[mi]))})` : fmt(monthlyNet[mi])}
                 </td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr className="bg-gray-100 border-t-2 border-gray-400">
-              <td className="px-4 py-2.5 font-bold text-gray-800 text-xs uppercase tracking-wide">Total</td>
+              <td className="px-4 py-2.5 font-bold text-gray-800 uppercase tracking-wide text-xs">Total</td>
               <td className="px-4 py-2.5 text-right font-bold tabular-nums text-gray-900">{fmt(totalCollected)}</td>
               <td className="px-4 py-2.5 text-right font-bold tabular-nums text-gray-600">({fmt(totalITC)})</td>
-              <td className={`px-4 py-2.5 text-right font-bold tabular-nums ${totalNet >= 0 ? "text-gray-900" : "text-green-700"}`}>
-                {totalNet >= 0 ? fmt(totalNet) : `(${fmt(Math.abs(totalNet))})`}
+              <td className={`px-4 py-2.5 text-right font-bold tabular-nums ${totalNet < 0 ? "text-green-700" : "text-red-700"}`}>
+                {totalNet < 0 ? `Refund: ${fmt(Math.abs(totalNet))}` : fmt(totalNet)}
               </td>
             </tr>
           </tfoot>
@@ -127,9 +151,9 @@ export default async function GSTTrackerPage({
       {/* Filing period summary */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100">
-          <h3 className="text-xs font-semibold text-gray-700">Filing Period Summary ({freq})</h3>
+          <h3 className="text-xs font-semibold text-gray-700">Filing Period Summary — {freq}</h3>
         </div>
-        <table className="w-full text-xs border-collapse">
+        <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-200">
               <th className="text-left px-4 py-2.5 font-semibold text-gray-700">Period</th>
@@ -140,63 +164,55 @@ export default async function GSTTrackerPage({
           </thead>
           <tbody>
             {quarters.map((q) => {
-              const qCollected = q.months.reduce((s, m) => s + monthlyCollected[m - 1], 0)
-              const qITC = q.months.reduce((s, m) => s + monthlyITC[m - 1], 0)
-              const qNet = qCollected - qITC
+              const qC = q.months.reduce((s, m) => s + monthlyCollected[m - 1], 0)
+              const qI = q.months.reduce((s, m) => s + monthlyITC[m - 1], 0)
+              const qN = qC - qI
               return (
                 <tr key={q.label} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-2.5 text-gray-700 font-medium">{q.label}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-800">{fmt(qCollected)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">({fmt(qITC)})</td>
-                  <td className={`px-4 py-2.5 text-right tabular-nums font-semibold ${qNet >= 0 ? "text-red-700" : "text-green-700"}`}>
-                    {qNet >= 0 ? fmt(qNet) : `Refund: ${fmt(Math.abs(qNet))}`}
+                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-800">{fmt(qC)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">({fmt(qI)})</td>
+                  <td className={`px-4 py-2.5 text-right tabular-nums font-semibold ${qN < 0 ? "text-green-700" : "text-red-700"}`}>
+                    {qN < 0 ? `Refund: ${fmt(Math.abs(qN))}` : fmt(qN)}
                   </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
-        <div className="px-4 py-3 bg-gray-50 border-t border-gray-100">
-          <p className="text-xs text-gray-400">
-            Net amount flows to GST/HST Payable (2020) on the Balance Sheet automatically.
-          </p>
-        </div>
+        <p className="px-4 py-2.5 text-xs text-gray-400 border-t border-gray-100 bg-gray-50">
+          Net GST/HST Payable flows automatically to account 2020 on the Balance Sheet.
+        </p>
       </div>
 
-      {/* Revenue breakdown by taxable account */}
-      <div className="mt-5 bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <h3 className="text-xs font-semibold text-gray-700">Taxable Revenue — GST Collected Detail</h3>
-        </div>
-        <table className="w-full text-xs border-collapse">
-          <thead>
-            <tr className="border-b border-gray-200">
-              <th className="text-left px-4 py-2 font-semibold text-gray-700">Account</th>
-              <th className="text-right px-4 py-2 font-semibold text-gray-700">Gross Revenue</th>
-              <th className="text-right px-4 py-2 font-semibold text-gray-700">Tax ({(rate*100).toFixed(0)}%)</th>
-              <th className="text-right px-4 py-2 font-semibold text-gray-700">Net Revenue</th>
-            </tr>
-          </thead>
-          <tbody>
-            {taxableRevRows.map((r) => {
-              let gross = 0
-              for (let m = 1; m <= 12; m++) gross += entryMap[`${r.code}-${m}`] ?? 0
-              if (gross === 0) return null
-              const tax = extractTax(gross)
-              return (
-                <tr key={r.code} className="border-b border-gray-100">
-                  <td className="px-4 py-2 text-gray-700">
-                    <span className="text-gray-400 mr-1">{r.code}</span>{r.label}
-                  </td>
-                  <td className="px-4 py-2 text-right tabular-nums text-gray-800">{fmt(gross)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-blue-700">{fmt(tax)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-gray-900">{fmt(gross - tax)}</td>
+      {/* Tax code breakdown */}
+      {taxCodeSummary.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <h3 className="text-xs font-semibold text-gray-700">By Tax Code</h3>
+          </div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="text-left px-4 py-2 font-semibold text-gray-700">Tax Code</th>
+                <th className="text-right px-4 py-2 font-semibold text-gray-700">Rate</th>
+                <th className="text-right px-4 py-2 font-semibold text-gray-700">Gross Revenue</th>
+                <th className="text-right px-4 py-2 font-semibold text-gray-700">Tax Collected</th>
+              </tr>
+            </thead>
+            <tbody>
+              {taxCodeSummary.map((tc) => (
+                <tr key={tc.id} className="border-b border-gray-100">
+                  <td className="px-4 py-2 text-gray-800 font-medium">{tc.name}</td>
+                  <td className="px-4 py-2 text-right text-gray-600">{(tc.rate * 100).toFixed(1)}%</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-gray-800">{fmt(tc.gross)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-blue-700 font-medium">{fmt(tc.tax)}</td>
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

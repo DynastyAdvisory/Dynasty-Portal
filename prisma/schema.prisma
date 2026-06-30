@@ -58,6 +58,9 @@ model Client {
   balanceSheetEntries BalanceSheetEntry[]
   periodLocks         PeriodLock[]
   auditLogs           AuditLog[]
+  taxCodes            TaxCode[]
+  accountConfigs      ClientAccountConfig[]
+  customAccounts      ClientCustomAccount[]
 
   @@map("clients")
 }
@@ -147,6 +150,56 @@ model PeriodLock {
   @@unique([clientId, fiscalYearId, month])
   @@map("period_locks")
 }
+
+// ─── Tax & COA customisation models ──────────────────────
+
+model TaxCode {
+  id        String   @id @default(cuid())
+  clientId  String   @map("client_id")
+  name      String
+  rate      Float    @default(0)
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  client         Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  accountConfigs ClientAccountConfig[]
+
+  @@map("tax_codes")
+}
+
+model ClientAccountConfig {
+  id          String   @id @default(cuid())
+  clientId    String   @map("client_id")
+  accountCode String   @map("account_code")
+  isHidden    Boolean  @default(false) @map("is_hidden")
+  taxCodeId   String?  @map("tax_code_id")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  client  Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  taxCode TaxCode? @relation(fields: [taxCodeId], references: [id], onDelete: SetNull)
+
+  @@unique([clientId, accountCode])
+  @@map("client_account_configs")
+}
+
+model ClientCustomAccount {
+  id         String   @id @default(cuid())
+  clientId   String   @map("client_id")
+  code       String
+  name       String
+  section    String
+  subsection String?
+  isActive   Boolean  @default(true) @map("is_active")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, code])
+  @@map("client_custom_accounts")
+}
+
+// ─── Audit ────────────────────────────────────────────────
 
 model AuditLog {
   id        String   @id @default(cuid())
