@@ -1,9 +1,9 @@
 "use client"
 
-import { useTransition } from "react"
+import { useState, useTransition, useRef } from "react"
 import { saveMonthlyEntry, lockPeriod, unlockPeriod } from "@/app/actions/entries"
 import { REVENUE_ROWS, COGS_ROWS, EXPENSE_ROWS, MONTHS, type AccountRow } from "@/lib/accounts"
-import { Lock, Unlock } from "lucide-react"
+import { Lock, Unlock, Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-react"
 
 interface TaxCodeOption { id: string; name: string; rate: number; isDefault: boolean }
 interface AccountConfigOption { accountCode: string; isHidden: boolean; taxCodeId: string | null }
@@ -13,7 +13,7 @@ interface Props {
   clientId: string
   fiscalYearId: string
   defaultTaxRate: number
-  entries: { accountCode: string; month: number; grossAmount: string | number }[]
+  entries: { accountCode: string; month: number; grossAmount: string | number; taxCodeId: string | null }[]
   locks: { month: number; lockedAt: Date; unlockedAt: Date | null }[]
   taxCodes: TaxCodeOption[]
   accountConfigs: AccountConfigOption[]
@@ -37,10 +37,16 @@ export default function MonthlyEntryClient({
   clientId, fiscalYearId, defaultTaxRate, entries, locks, taxCodes, accountConfigs, customAccounts, isStaff,
 }: Props) {
   const [, startTransition] = useTransition()
+  const [hideEmpty, setHideEmpty] = useState(false)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [openTaxCell, setOpenTaxCell] = useState<string | null>(null) // `${code}-${month}`
+  const taxSelectRef = useRef<HTMLSelectElement>(null)
 
   const entryMap: Record<string, number> = {}
+  const entryTaxMap: Record<string, string | null> = {}
   for (const e of entries) {
     entryMap[`${e.accountCode}-${e.month}`] = parseFloat(String(e.grossAmount))
+    entryTaxMap[`${e.accountCode}-${e.month}`] = e.taxCodeId
   }
 
   const hiddenSet = new Set(accountConfigs.filter((c) => c.isHidden).map((c) => c.accountCode))
@@ -48,29 +54,22 @@ export default function MonthlyEntryClient({
   const taxCodeById = new Map(taxCodes.map((t) => [t.id, t]))
   const defaultTaxCode = taxCodes.find((t) => t.isDefault)
 
-  function getRate(code: string) {
-    const tcId = taxCodeMap.get(code)
-    if (tcId) return taxCodeById.get(tcId)?.rate ?? defaultTaxRate
-    return defaultTaxCode?.rate ?? defaultTaxRate
+  function getEffectiveTaxCodeId(code: string, month: number): string | null {
+    const cellOverride = entryTaxMap[`${code}-${month}`]
+    if (cellOverride !== undefined) return cellOverride
+    return taxCodeMap.get(code) ?? defaultTaxCode?.id ?? null
   }
 
-  function getTaxCodeIdForAccount(code: string) {
-    return taxCodeMap.get(code) ?? (defaultTaxCode?.id ?? "")
+  function getEffectiveTaxName(code: string, month: number): string {
+    const tcId = getEffectiveTaxCodeId(code, month)
+    if (!tcId) return defaultTaxRate > 0 ? `${(defaultTaxRate * 100).toFixed(0)}%` : "—"
+    const tc = taxCodeById.get(tcId)
+    if (!tc) return "—"
+    return tc.rate > 0 ? tc.name.slice(0, 5) : "Exempt"
   }
 
-  // Build full rows: standard (filtered) + custom injected by section
-  function buildRows(standardRows: AccountRow[], section: string) {
-    const rows: (AccountRow | { type: "ACCOUNT"; code: string; label: string; isCustom: true })[] = []
-    for (const row of standardRows) {
-      if (row.type === "ACCOUNT" && row.code && hiddenSet.has(row.code)) continue
-      rows.push(row)
-      // Inject custom accounts after last standard account in their subsection
-      if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
-        // handled below
-      }
-    }
-    return rows
-  }
+  const hasTaxCodes = taxCodes.length > 0
+  const colSpan = 14
 
   const customBySection: Record<string, CustomAccountOption[]> = {}
   for (const ca of customAccounts) {
@@ -85,15 +84,27 @@ export default function MonthlyEntryClient({
     startTransition(async () => { await saveMonthlyEntry(clientId, fiscalYearId, code, month, val) })
   }
 
-  function handleTaxCodeChange(code: string, taxCodeId: string) {
-    // Update via accountconfig action — optimistic update not needed, page will revalidate
-    import("@/app/actions/accountconfig").then(({ setAccountTaxCode }) => {
-      startTransition(async () => { await setAccountTaxCode(clientId, code, taxCodeId || null) })
+  function handleCellTaxChange(code: string, month: number, taxCodeId: string | null, currentVal: number) {
+    startTransition(async () => {
+      await saveMonthlyEntry(clientId, fiscalYearId, code, month, currentVal, taxCodeId)
+    })
+    setOpenTaxCell(null)
+  }
+
+  function handleToggleHidden(code: string, isCurrentlyHidden: boolean) {
+    import("@/app/actions/accountconfig").then(({ setAccountHidden }) => {
+      startTransition(async () => { await setAccountHidden(clientId, code, !isCurrentlyHidden) })
     })
   }
 
-  const hasTaxCodes = taxCodes.length > 0
-  const colSpan = hasTaxCodes ? 15 : 14
+  function toggleCollapse(key: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   const allSections = [
     { rows: REVENUE_ROWS, key: "REVENUE" },
@@ -103,13 +114,23 @@ export default function MonthlyEntryClient({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-xs border-collapse" style={{ minWidth: hasTaxCodes ? "1100px" : "900px" }}>
+      {/* Controls bar */}
+      <div className="px-4 py-2 flex items-center gap-3 border-b border-gray-100 bg-gray-50">
+        <button
+          onClick={() => setHideEmpty((v) => !v)}
+          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+            hideEmpty ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+          }`}
+        >
+          {hideEmpty ? "Showing non-empty rows" : "Hide empty rows"}
+        </button>
+        <span className="text-xs text-gray-400">Click section headers to collapse</span>
+      </div>
+
+      <table className="w-full text-xs border-collapse" style={{ minWidth: "900px" }}>
         <thead className="sticky top-0 z-10 bg-white">
           <tr>
             <th className="text-left font-semibold text-gray-700 px-4 py-3 w-52 border-b border-gray-200">Account</th>
-            {hasTaxCodes && (
-              <th className="text-left font-semibold text-gray-700 px-2 py-3 w-36 border-b border-gray-200">Tax</th>
-            )}
             {MONTHS.map((m, i) => {
               const locked = isMonthLocked(locks, i + 1)
               return (
@@ -144,27 +165,33 @@ export default function MonthlyEntryClient({
           {allSections.map(({ rows, key }) => {
             const sectionCustom = customBySection[key] ?? []
             const allRows = [...rows]
-            // Insert custom accounts before the TOTAL row of the section
             const totalIdx = allRows.findIndex((r) => r.type === "TOTAL")
             if (sectionCustom.length > 0 && totalIdx > -1) {
-              const customRows: AccountRow[] = sectionCustom.map((ca) => ({
-                type: "ACCOUNT" as const,
-                label: ca.name,
-                code: ca.code,
-              }))
+              const customRows: AccountRow[] = sectionCustom.map((ca) => ({ type: "ACCOUNT" as const, label: ca.name, code: ca.code }))
               allRows.splice(totalIdx, 0, ...customRows)
             }
+
+            const isCollapsed = collapsed.has(key)
 
             return allRows.map((row, idx) => {
               if (row.type === "SECTION") {
                 return (
-                  <tr key={`${key}-section-${idx}`} className="bg-gray-50">
-                    <td colSpan={colSpan} className="px-4 py-2 text-xs font-bold text-gray-700 uppercase tracking-wide border-b border-gray-200">
-                      {row.label}
+                  <tr key={`${key}-section-${idx}`} className="bg-gray-50 cursor-pointer select-none" onClick={() => toggleCollapse(key)}>
+                    <td colSpan={colSpan} className="px-4 py-2 border-b border-gray-200">
+                      <div className="flex items-center gap-2">
+                        {isCollapsed
+                          ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                          : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+                        <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">{row.label}</span>
+                      </div>
                     </td>
                   </tr>
                 )
               }
+
+              // When section is collapsed: hide everything except TOTAL rows
+              if (isCollapsed && row.type !== "TOTAL") return null
+
               if (row.type === "SUBSECTION") {
                 return (
                   <tr key={`${key}-sub-${idx}`} className="bg-gray-50">
@@ -174,8 +201,8 @@ export default function MonthlyEntryClient({
                   </tr>
                 )
               }
+
               if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
-                // Sum account rows since last break
                 let startI = 0
                 for (let j = idx - 1; j >= 0; j--) {
                   const t = allRows[j].type
@@ -189,7 +216,7 @@ export default function MonthlyEntryClient({
                 const isBold = row.type === "TOTAL"
                 return (
                   <tr key={`${key}-total-${idx}`} className={`${isBold ? "bg-gray-100 font-bold" : "bg-gray-50 font-semibold"} border-t border-gray-300`}>
-                    <td colSpan={hasTaxCodes ? 2 : 1} className={`px-4 py-2 text-gray-800 text-xs ${isBold ? "uppercase tracking-wide" : ""}`}>{row.label}</td>
+                    <td className={`px-4 py-2 text-gray-800 text-xs ${isBold ? "uppercase tracking-wide" : ""}`}>{row.label}</td>
                     {monthTotals.map((v, mi) => (
                       <td key={mi} className="px-1.5 py-2 text-right text-gray-800 tabular-nums text-xs">
                         {v !== 0 ? fmt(v) : ""}
@@ -202,45 +229,80 @@ export default function MonthlyEntryClient({
 
               // ACCOUNT row
               const code = row.code!
-              if (hiddenSet.has(code)) return null
-
               const monthVals = Array.from({ length: 12 }, (_, mi) => entryMap[`${code}-${mi + 1}`] ?? 0)
+              const hasData = monthVals.some((v) => v !== 0)
+              const isHidden = hiddenSet.has(code)
+
+              // Hide logic: hidden + no data = skip; hidden + has data = show with warning
+              if (isHidden && !hasData) return null
+              // Empty row filtering
+              if (hideEmpty && !hasData && !isHidden) return null
+
               const rowTotal = monthVals.reduce((a, b) => a + b, 0)
-              const currentTaxCodeId = getTaxCodeIdForAccount(code)
 
               return (
-                <tr key={`${key}-acc-${code}`} className="hover:bg-blue-50/30 border-b border-gray-100">
+                <tr key={`${key}-acc-${code}`} className={`border-b border-gray-100 hover:bg-blue-50/30 ${isHidden ? "border-l-2 border-l-amber-400" : ""}`}>
                   <td className="px-4 py-1.5 text-gray-700 whitespace-nowrap">
-                    <span className="text-gray-400 mr-1.5">{code}</span>
-                    {row.label}
+                    <div className="flex items-center gap-1.5">
+                      {isStaff && (
+                        <button
+                          onClick={() => handleToggleHidden(code, isHidden)}
+                          className={`shrink-0 transition-colors ${isHidden ? "text-amber-500 hover:text-amber-700" : "text-gray-200 hover:text-gray-400"}`}
+                          title={isHidden ? "Account is hidden in reports — click to show" : "Hide this account"}
+                        >
+                          {isHidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        </button>
+                      )}
+                      <span className="text-gray-400 mr-0.5">{code}</span>
+                      <span className={isHidden ? "text-amber-600" : ""}>{row.label}</span>
+                      {isHidden && <span className="text-[10px] text-amber-500 ml-1">(hidden)</span>}
+                    </div>
                   </td>
-                  {hasTaxCodes && (
-                    <td className="px-2 py-1">
-                      <select
-                        value={currentTaxCodeId}
-                        onChange={(e) => handleTaxCodeChange(code, e.target.value)}
-                        className="w-full text-xs px-1.5 py-1 border border-gray-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
-                      >
-                        {taxCodes.map((tc) => (
-                          <option key={tc.id} value={tc.id}>
-                            {tc.name}{tc.isDefault ? " ★" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  )}
                   {monthVals.map((val, mi) => {
-                    const locked = isMonthLocked(locks, mi + 1)
+                    const month = mi + 1
+                    const locked = isMonthLocked(locks, month)
+                    const cellKey = `${code}-${month}`
+                    const taxName = hasTaxCodes && isStaff && val !== 0 ? getEffectiveTaxName(code, month) : null
+                    const isTaxOpen = openTaxCell === cellKey
+
                     return (
-                      <td key={mi} className={`px-1 py-1 ${locked ? "bg-amber-50" : ""}`}>
+                      <td key={mi} className={`px-1 py-1 relative ${locked ? "bg-amber-50" : ""}`}>
                         <input
                           defaultValue={val > 0 ? fmt(val) : ""}
-                          onBlur={(e) => handleBlur(code, mi + 1, e)}
+                          onBlur={(e) => handleBlur(code, month, e)}
                           disabled={locked}
                           className={`w-full text-right text-xs px-1.5 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 ${
                             locked ? "bg-amber-50 text-gray-400 cursor-not-allowed" : "bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-gray-300"
                           }`}
                         />
+                        {taxName && (
+                          <div className="relative">
+                            <button
+                              onClick={() => setOpenTaxCell(isTaxOpen ? null : cellKey)}
+                              className="w-full text-right text-[9px] text-blue-500 hover:text-blue-700 leading-none px-1.5 pb-0.5 truncate"
+                            >
+                              {taxName}
+                            </button>
+                            {isTaxOpen && (
+                              <div className="absolute right-0 top-full z-30 bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-36">
+                                <p className="text-[10px] text-gray-500 mb-1.5 font-medium">Tax for this cell</p>
+                                <select
+                                  ref={taxSelectRef}
+                                  defaultValue={entryTaxMap[cellKey] ?? ""}
+                                  autoFocus
+                                  onBlur={() => setTimeout(() => setOpenTaxCell(null), 150)}
+                                  onChange={(e) => handleCellTaxChange(code, month, e.target.value || null, val)}
+                                  className="w-full text-xs border border-gray-200 rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                >
+                                  <option value="">Account default</option>
+                                  {taxCodes.map((tc) => (
+                                    <option key={tc.id} value={tc.id}>{tc.name} ({(tc.rate * 100).toFixed(0)}%)</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                     )
                   })}

@@ -89,7 +89,7 @@ export default function UsersClient({ profiles, clients }: { profiles: ProfileWi
       )}
 
       {showInvite && (
-        <InviteUserModal clients={clients} onClose={() => setShowInvite(false)} />
+        <InviteUserModal clients={clients} onClose={() => setShowInvite(false)} currentUserRole="ADMIN" />
       )}
     </div>
   )

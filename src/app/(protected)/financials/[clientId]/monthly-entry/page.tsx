@@ -54,7 +54,7 @@ export default async function MonthlyEntryPage({
         clientId={clientId}
         fiscalYearId={fiscalYear.id}
         defaultTaxRate={client.taxRate}
-        entries={entries.map((e) => ({ accountCode: e.accountCode, month: e.month, grossAmount: e.grossAmount.toString() }))}
+        entries={entries.map((e) => ({ accountCode: e.accountCode, month: e.month, grossAmount: e.grossAmount.toString(), taxCodeId: e.taxCodeId ?? null }))}
         locks={locks.map((l) => ({ month: l.month, lockedAt: l.lockedAt, unlockedAt: l.unlockedAt }))}
         taxCodes={taxCodes.map((t) => ({ id: t.id, name: t.name, rate: t.rate, isDefault: t.isDefault }))}
         accountConfigs={accountConfigs.map((c) => ({ accountCode: c.accountCode, isHidden: c.isHidden, taxCodeId: c.taxCodeId }))}

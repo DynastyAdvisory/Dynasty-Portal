@@ -13,24 +13,47 @@ function getAdminClient() {
   return createSupabaseClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
 }
 
+function generateTempPassword(length = 12) {
+  const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+  const bytes = new Uint8Array(length)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes).map((b) => chars[b % chars.length]).join("")
+}
+
 const InviteSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
   role: z.enum(["ADMIN", "ACCOUNTANT", "BOOKKEEPER", "CLIENT"]),
-  clientId: z.string().optional(),
 })
 
 export async function inviteUser(formData: FormData) {
   const profile = await getCurrentProfile()
-  if (!profile || profile.role !== "ADMIN") throw new Error("Unauthorized")
+  if (!profile) throw new Error("Unauthorized")
+
+  const canInviteStaff = profile.role === "ADMIN"
+  const canInviteClient = profile.role === "ADMIN" || profile.role === "ACCOUNTANT" || profile.role === "BOOKKEEPER"
+  if (!canInviteClient) throw new Error("Unauthorized")
 
   const parsed = InviteSchema.safeParse(Object.fromEntries(formData))
   if (!parsed.success) return { error: parsed.error.flatten().fieldErrors }
 
-  const { email, name, role, clientId } = parsed.data
+  const { email, name, role } = parsed.data
+
+  if (!canInviteStaff && role !== "CLIENT") {
+    return { error: { role: ["You can only invite client users"] } }
+  }
+
+  const clientIds = formData.getAll("clientIds") as string[]
+  const singleClientId = formData.get("clientId") as string | null
 
   const supabaseAdmin = getAdminClient()
-  const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email)
+  const tempPassword = generateTempPassword()
+
+  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    password: tempPassword,
+    email_confirm: true,
+  })
   if (error) return { error: { _form: [error.message] } }
 
   await prisma.profile.create({
@@ -39,18 +62,20 @@ export async function inviteUser(formData: FormData) {
       email,
       name,
       role,
-      clientId: role === "CLIENT" ? clientId ?? null : null,
+      clientId: role === "CLIENT" ? (singleClientId || clientIds[0] || null) : null,
     },
   })
 
-  if ((role === "ACCOUNTANT" || role === "BOOKKEEPER") && clientId) {
-    await prisma.clientAssignment.create({
-      data: { clientId, profileId: data.user.id },
+  if ((role === "ACCOUNTANT" || role === "BOOKKEEPER") && clientIds.length > 0) {
+    await prisma.clientAssignment.createMany({
+      data: clientIds.map((clientId) => ({ clientId, profileId: data.user.id })),
+      skipDuplicates: true,
     })
   }
 
   revalidatePath("/admin/users")
-  return { success: true }
+  revalidatePath("/users")
+  return { success: true, tempPassword, name }
 }
 
 export async function updateUserRole(profileId: string, role: "ADMIN" | "ACCOUNTANT" | "BOOKKEEPER" | "CLIENT") {

@@ -108,8 +108,11 @@ model MonthlyEntry {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  taxCodeId String? @map("tax_code_id")
+
   client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
   fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  taxCode    TaxCode?   @relation(fields: [taxCodeId], references: [id], onDelete: SetNull)
 
   @@unique([clientId, fiscalYearId, accountCode, month])
   @@map("monthly_entries")
@@ -163,6 +166,7 @@ model TaxCode {
 
   client         Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
   accountConfigs ClientAccountConfig[]
+  monthlyEntries MonthlyEntry[]
 
   @@map("tax_codes")
 }

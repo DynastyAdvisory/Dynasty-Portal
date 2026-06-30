@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma"
 import { getCurrentProfile } from "@/lib/auth"
 import { redirect, notFound } from "next/navigation"
 import { REVENUE_ROWS, COGS_ROWS, EXPENSE_ROWS, MONTHS } from "@/lib/accounts"
+import PLClient, { type CalcRow, type SectionData } from "./PLClient"
 
 export default async function PLPage({
   params,
@@ -32,7 +33,11 @@ export default async function PLPage({
   ])
 
   const entryMap: Record<string, number> = {}
-  for (const e of entries) entryMap[`${e.accountCode}-${e.month}`] = parseFloat(e.grossAmount.toString())
+  const entryTaxOverride = new Map<string, string>()
+  for (const e of entries) {
+    entryMap[`${e.accountCode}-${e.month}`] = parseFloat(e.grossAmount.toString())
+    if (e.taxCodeId) entryTaxOverride.set(`${e.accountCode}-${e.month}`, e.taxCodeId)
+  }
 
   const hiddenSet = new Set(accountConfigs.filter((c) => c.isHidden).map((c) => c.accountCode))
   const taxCodeById = new Map(taxCodes.map((t) => [t.id, t]))
@@ -40,156 +45,102 @@ export default async function PLPage({
   const defaultTaxCode = taxCodes.find((t) => t.isDefault)
   const fallbackRate = defaultTaxCode?.rate ?? client.taxRate
 
-  function getRate(code: string) {
+  function getRate(code: string, month?: number) {
+    if (month !== undefined) {
+      const cellOverride = entryTaxOverride.get(`${code}-${month}`)
+      if (cellOverride) return taxCodeById.get(cellOverride)?.rate ?? fallbackRate
+    }
     const tcId = acctTaxCodeMap.get(code)
     if (tcId) return taxCodeById.get(tcId)?.rate ?? fallbackRate
     return fallbackRate
   }
 
-  function netOf(gross: number, code: string) {
-    const r = getRate(code)
+  function netOf(gross: number, code: string, month?: number) {
+    const r = getRate(code, month)
     return r > 0 ? gross / (1 + r) : gross
   }
 
-  const fmt = (n: number) => n !== 0 ? n.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""
-
-  // Build rows with custom accounts injected
-  function buildAccountRows(stdRows: typeof REVENUE_ROWS, sectionKey: string) {
+  function buildSectionCalcRows(stdRows: typeof REVENUE_ROWS, sectionKey: string): CalcRow[] {
     const custom = customAccounts.filter((c) => c.section === sectionKey)
-    const rows = stdRows.filter((r) => r.type !== "ACCOUNT" || !r.code || !hiddenSet.has(r.code))
-    const totalIdx = rows.findLastIndex((r) => r.type === "TOTAL")
+    const filtered = stdRows.filter((r) => r.type !== "ACCOUNT" || !r.code || !hiddenSet.has(r.code))
+    // Insert custom accounts before TOTAL
+    const totalIdx = filtered.map((r) => r.type).lastIndexOf("TOTAL")
+    const rows = [...filtered]
     if (totalIdx > -1 && custom.length) {
-      const customRows = custom.map((c) => ({ type: "ACCOUNT" as const, label: c.name, code: c.code }))
-      rows.splice(totalIdx, 0, ...customRows)
+      rows.splice(totalIdx, 0, ...custom.map((c) => ({ type: "ACCOUNT" as const, label: c.name, code: c.code })))
     }
-    return rows
-  }
 
-  function sumAccounts(rows: typeof REVENUE_ROWS, sectionKey: string, month?: number) {
-    const custom = customAccounts.filter((c) => c.section === sectionKey)
-    const allCodes = [
-      ...rows.filter((r) => r.type === "ACCOUNT" && r.code && !hiddenSet.has(r.code)).map((r) => r.code!),
-      ...custom.map((c) => c.code),
-    ]
-    let total = 0
-    for (const code of allCodes) {
-      if (month !== undefined) {
-        total += netOf(entryMap[`${code}-${month}`] ?? 0, code)
-      } else {
-        for (let m = 1; m <= 12; m++) total += netOf(entryMap[`${code}-${m}`] ?? 0, code)
+    const calcRows: CalcRow[] = []
+    for (let idx = 0; idx < rows.length; idx++) {
+      const row = rows[idx]
+      if (row.type === "SECTION") {
+        calcRows.push({ type: "SECTION", label: row.label, monthVals: [], rowTotal: 0 })
+        continue
       }
+      if (row.type === "SUBSECTION") {
+        calcRows.push({ type: "SUBSECTION", label: row.label, monthVals: [], rowTotal: 0 })
+        continue
+      }
+      if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
+        let startI = 0
+        for (let j = idx - 1; j >= 0; j--) {
+          const t = rows[j].type
+          if (t === "SUBTOTAL" || t === "TOTAL" || t === "SECTION" || t === "SUBSECTION") { startI = j + 1; break }
+        }
+        const accs = rows.slice(startI, idx).filter((r) => r.type === "ACCOUNT" && r.code && !hiddenSet.has(r.code!))
+        const monthVals = Array.from({ length: 12 }, (_, mi) =>
+          accs.reduce((s, r) => s + netOf(entryMap[`${r.code}-${mi + 1}`] ?? 0, r.code!, mi + 1), 0)
+        )
+        calcRows.push({ type: row.type, label: row.label, monthVals, rowTotal: monthVals.reduce((a, b) => a + b, 0) })
+        continue
+      }
+      // ACCOUNT
+      const code = row.code!
+      const monthVals = Array.from({ length: 12 }, (_, mi) => netOf(entryMap[`${code}-${mi + 1}`] ?? 0, code, mi + 1))
+      calcRows.push({ type: "ACCOUNT", label: row.label, code, monthVals, rowTotal: monthVals.reduce((a, b) => a + b, 0) })
     }
-    return total
+    return calcRows
   }
 
-  const monthlyRevenue = MONTHS.map((_, mi) => sumAccounts(REVENUE_ROWS, "REVENUE", mi + 1))
-  const monthlyCOGS = MONTHS.map((_, mi) => sumAccounts(COGS_ROWS, "COGS", mi + 1))
-  const monthlyGrossProfit = monthlyRevenue.map((r, i) => r - monthlyCOGS[i])
-  const monthlyExpenses = MONTHS.map((_, mi) => sumAccounts(EXPENSE_ROWS, "EXPENSE", mi + 1))
-  const monthlyNetIncome = monthlyGrossProfit.map((gp, i) => gp - monthlyExpenses[i])
+  function sectionTotals(calcRows: CalcRow[]) {
+    const accs = calcRows.filter((r) => r.type === "ACCOUNT")
+    const monthTotals = Array.from({ length: 12 }, (_, mi) => accs.reduce((s, r) => s + (r.monthVals[mi] ?? 0), 0))
+    return { monthTotals, sectionTotal: monthTotals.reduce((a, b) => a + b, 0) }
+  }
 
-  const totalRevenue = monthlyRevenue.reduce((a, b) => a + b, 0)
-  const totalCOGS = monthlyCOGS.reduce((a, b) => a + b, 0)
-  const totalGrossProfit = totalRevenue - totalCOGS
-  const totalExpenses = monthlyExpenses.reduce((a, b) => a + b, 0)
-  const totalNetIncome = totalGrossProfit - totalExpenses
+  const sectionDefs = [
+    { key: "REVENUE", label: "Revenue", rows: REVENUE_ROWS },
+    { key: "COGS", label: "Cost of Goods Sold", rows: COGS_ROWS },
+    { key: "EXPENSE", label: "Operating Expenses", rows: EXPENSE_ROWS },
+  ]
 
-  const revRows = buildAccountRows(REVENUE_ROWS, "REVENUE")
-  const cogsRows = buildAccountRows(COGS_ROWS, "COGS")
-  const expRows = buildAccountRows(EXPENSE_ROWS, "EXPENSE")
+  const sections: SectionData[] = sectionDefs.map(({ key, label, rows }) => {
+    const calcRows = buildSectionCalcRows(rows, key)
+    const { monthTotals, sectionTotal } = sectionTotals(calcRows)
+    return { key, label, rows: calcRows, monthTotals, sectionTotal }
+  })
+
+  const revTotals = sections[0].monthTotals
+  const cogsTotals = sections[1].monthTotals
+  const expTotals = sections[2].monthTotals
+  const monthlyGrossProfit = revTotals.map((r, i) => r - cogsTotals[i])
+  const monthlyNetIncome = monthlyGrossProfit.map((gp, i) => gp - expTotals[i])
+  const totalGrossProfit = monthlyGrossProfit.reduce((a, b) => a + b, 0)
+  const totalNetIncome = monthlyNetIncome.reduce((a, b) => a + b, 0)
 
   return (
-    <div className="overflow-x-auto">
+    <div>
       <div className="px-4 pt-4 pb-2">
         <h2 className="text-sm font-semibold text-gray-900">Profit & Loss — FY {fiscalYear.year}</h2>
-        <p className="text-xs text-gray-400 mt-0.5">Net of tax per account's assigned tax code. Read-only.</p>
+        <p className="text-xs text-gray-400 mt-0.5">Net of tax per account's assigned tax code. Click section headers to collapse. Read-only.</p>
       </div>
-      <table className="w-full text-xs border-collapse min-w-[900px]">
-        <thead className="sticky top-0 z-10 bg-white">
-          <tr>
-            <th className="text-left font-semibold text-gray-700 px-4 py-3 w-60 border-b border-gray-200">Account</th>
-            {MONTHS.map((m) => (
-              <th key={m} className="text-right font-semibold text-gray-700 px-2 py-3 border-b border-gray-200 min-w-[68px]">{m}</th>
-            ))}
-            <th className="text-right font-semibold text-gray-700 px-4 py-3 border-b border-gray-200 min-w-[90px]">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          <PLSection label="REVENUE" rows={revRows} entryMap={entryMap} hiddenSet={hiddenSet} netOf={netOf} monthTotals={monthlyRevenue} grandTotal={totalRevenue} bold />
-          <PLSection label="COST OF GOODS SOLD" rows={cogsRows} entryMap={entryMap} hiddenSet={hiddenSet} netOf={netOf} monthTotals={monthlyCOGS} grandTotal={totalCOGS} />
-          <TotalRow label="GROSS PROFIT" monthValues={monthlyGrossProfit} total={totalGrossProfit} bold highlight />
-          <PLSection label="OPERATING EXPENSES" rows={expRows} entryMap={entryMap} hiddenSet={hiddenSet} netOf={netOf} monthTotals={monthlyExpenses} grandTotal={totalExpenses} />
-          <TotalRow label="NET INCOME / (LOSS)" monthValues={monthlyNetIncome} total={totalNetIncome} bold highlight />
-        </tbody>
-      </table>
+      <PLClient
+        sections={sections}
+        monthlyGrossProfit={monthlyGrossProfit}
+        monthlyNetIncome={monthlyNetIncome}
+        totalGrossProfit={totalGrossProfit}
+        totalNetIncome={totalNetIncome}
+      />
     </div>
-  )
-}
-
-function PLSection({ label, rows, entryMap, hiddenSet, netOf, monthTotals, grandTotal, bold }: {
-  label: string; rows: any[]; entryMap: Record<string, number>; hiddenSet: Set<string>
-  netOf: (g: number, code: string) => number; monthTotals: number[]; grandTotal: number; bold?: boolean
-}) {
-  const fmt = (n: number) => n !== 0 ? n.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""
-  return (
-    <>
-      <tr className="bg-gray-50">
-        <td colSpan={14} className="px-4 py-2 text-xs font-bold text-gray-700 uppercase tracking-wide border-b border-gray-200">{label}</td>
-      </tr>
-      {rows.map((row, idx) => {
-        if (row.type === "SECTION") return null
-        if (row.type === "SUBSECTION") return (
-          <tr key={idx} className="bg-gray-50">
-            <td colSpan={14} className="px-4 py-1.5 text-xs font-semibold text-gray-500 italic">{row.label}</td>
-          </tr>
-        )
-        if (row.type === "SUBTOTAL" || row.type === "TOTAL") {
-          let startI = 0
-          for (let j = idx - 1; j >= 0; j--) {
-            const t = rows[j].type
-            if (t === "SUBTOTAL" || t === "TOTAL" || t === "SECTION" || t === "SUBSECTION") { startI = j + 1; break }
-          }
-          const accs = rows.slice(startI, idx).filter((r: any) => r.type === "ACCOUNT" && r.code && !hiddenSet.has(r.code))
-          const mTotals = Array.from({ length: 12 }, (_, mi) => accs.reduce((s: number, r: any) => s + netOf(entryMap[`${r.code}-${mi + 1}`] ?? 0, r.code), 0))
-          const gt = mTotals.reduce((a, b) => a + b, 0)
-          const isBold = row.type === "TOTAL" && bold
-          return (
-            <tr key={idx} className={`${isBold ? "bg-gray-100 font-bold" : "bg-gray-50 font-semibold"} border-t border-gray-300`}>
-              <td className="px-4 py-2 text-gray-800 text-xs uppercase tracking-wide">{row.label}</td>
-              {mTotals.map((v, i) => <td key={i} className="px-2 py-2 text-right tabular-nums text-xs text-gray-800">{fmt(v)}</td>)}
-              <td className="px-4 py-2 text-right tabular-nums text-xs font-semibold text-gray-900">{fmt(gt)}</td>
-            </tr>
-          )
-        }
-        if (!row.code || hiddenSet.has(row.code)) return null
-        const mVals = Array.from({ length: 12 }, (_, mi) => netOf(entryMap[`${row.code}-${mi + 1}`] ?? 0, row.code))
-        const total = mVals.reduce((a, b) => a + b, 0)
-        return (
-          <tr key={idx} className="border-b border-gray-100 hover:bg-blue-50/20">
-            <td className="px-4 py-1.5 text-gray-700">
-              <span className="text-gray-400 mr-1.5">{row.code}</span>{row.label}
-            </td>
-            {mVals.map((v, i) => <td key={i} className="px-2 py-1.5 text-right text-gray-800 tabular-nums">{fmt(v)}</td>)}
-            <td className="px-4 py-1.5 text-right text-gray-900 font-medium tabular-nums">{fmt(total)}</td>
-          </tr>
-        )
-      })}
-      <TotalRow label={`TOTAL ${label}`} monthValues={monthTotals} total={grandTotal} />
-    </>
-  )
-}
-
-function TotalRow({ label, monthValues, total, bold, highlight }: {
-  label: string; monthValues: number[]; total: number; bold?: boolean; highlight?: boolean
-}) {
-  const fmt = (n: number) => n !== 0 ? n.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""
-  return (
-    <tr className={`${highlight ? "bg-blue-50" : "bg-gray-100"} border-t-2 border-gray-400`}>
-      <td className={`px-4 py-2.5 ${bold ? "font-bold uppercase tracking-wide" : "font-semibold"} text-xs text-gray-800`}>{label}</td>
-      {monthValues.map((v, i) => (
-        <td key={i} className={`px-2 py-2.5 text-right tabular-nums text-xs ${v < 0 ? "text-red-700" : "text-gray-800"} ${bold ? "font-bold" : "font-semibold"}`}>{fmt(v)}</td>
-      ))}
-      <td className={`px-4 py-2.5 text-right tabular-nums text-xs ${total < 0 ? "text-red-700" : "text-gray-900"} ${bold ? "font-bold" : "font-semibold"}`}>{fmt(total)}</td>
-    </tr>
   )
 }

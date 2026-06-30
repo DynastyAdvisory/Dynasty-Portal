@@ -34,7 +34,11 @@ export default async function BalanceSheetPage({
   ])
 
   const entryMap: Record<string, number> = {}
-  for (const e of monthlyEntries) entryMap[`${e.accountCode}-${e.month}`] = parseFloat(e.grossAmount.toString())
+  const entryTaxOverride = new Map<string, string>()
+  for (const e of monthlyEntries) {
+    entryMap[`${e.accountCode}-${e.month}`] = parseFloat(e.grossAmount.toString())
+    if (e.taxCodeId) entryTaxOverride.set(`${e.accountCode}-${e.month}`, e.taxCodeId)
+  }
 
   const hiddenSet = new Set(accountConfigs.filter((c) => c.isHidden).map((c) => c.accountCode))
   const taxCodeById = new Map(taxCodes.map((t) => [t.id, t]))
@@ -42,7 +46,11 @@ export default async function BalanceSheetPage({
   const defaultTaxCode = taxCodes.find((t) => t.isDefault)
   const fallbackRate = defaultTaxCode?.rate ?? client.taxRate
 
-  function getRate(code: string) {
+  function getRate(code: string, month?: number) {
+    if (month !== undefined) {
+      const cellOverride = entryTaxOverride.get(`${code}-${month}`)
+      if (cellOverride) return taxCodeById.get(cellOverride)?.rate ?? fallbackRate
+    }
     const tcId = acctTaxMap.get(code)
     return tcId ? (taxCodeById.get(tcId)?.rate ?? fallbackRate) : fallbackRate
   }
@@ -58,9 +66,9 @@ export default async function BalanceSheetPage({
   for (const r of allIncomeCodes) {
     const code = "code" in r ? r.code! : (r as any).code
     let rowTotal = 0
-    const rate = getRate(code)
     for (let m = 1; m <= 12; m++) {
       const gross = entryMap[`${code}-${m}`] ?? 0
+      const rate = getRate(code, m)
       rowTotal += rate > 0 ? gross / (1 + rate) : gross
     }
     const section = "section" in r ? (r as any).section : (
@@ -84,12 +92,16 @@ export default async function BalanceSheetPage({
   ]
   let gstCollected = 0, gstITC = 0
   for (const code of taxableRevCodes) {
-    const r = getRate(code)
-    for (let m = 1; m <= 12; m++) gstCollected += (entryMap[`${code}-${m}`] ?? 0) * r / (1 + r)
+    for (let m = 1; m <= 12; m++) {
+      const r = getRate(code, m)
+      gstCollected += (entryMap[`${code}-${m}`] ?? 0) * r / (1 + r)
+    }
   }
   for (const code of itcExpCodes) {
-    const r = getRate(code)
-    for (let m = 1; m <= 12; m++) gstITC += (entryMap[`${code}-${m}`] ?? 0) * r / (1 + r)
+    for (let m = 1; m <= 12; m++) {
+      const r = getRate(code, m)
+      gstITC += (entryMap[`${code}-${m}`] ?? 0) * r / (1 + r)
+    }
   }
   const gstPayable = gstCollected - gstITC
 

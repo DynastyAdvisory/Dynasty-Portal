@@ -32,7 +32,11 @@ export default async function GSTTrackerPage({
   ])
 
   const entryMap: Record<string, number> = {}
-  for (const e of entries) entryMap[`${e.accountCode}-${e.month}`] = parseFloat(e.grossAmount.toString())
+  const entryTaxOverride = new Map<string, string>()
+  for (const e of entries) {
+    entryMap[`${e.accountCode}-${e.month}`] = parseFloat(e.grossAmount.toString())
+    if (e.taxCodeId) entryTaxOverride.set(`${e.accountCode}-${e.month}`, e.taxCodeId)
+  }
 
   const hiddenSet = new Set(accountConfigs.filter((c) => c.isHidden).map((c) => c.accountCode))
   const taxCodeById = new Map(taxCodes.map((t) => [t.id, t]))
@@ -40,14 +44,18 @@ export default async function GSTTrackerPage({
   const defaultTaxCode = taxCodes.find((t) => t.isDefault)
   const fallbackRate = defaultTaxCode?.rate ?? client.taxRate
 
-  function getRate(code: string) {
+  function getRate(code: string, month?: number) {
+    if (month !== undefined) {
+      const cellOverride = entryTaxOverride.get(`${code}-${month}`)
+      if (cellOverride) return taxCodeById.get(cellOverride)?.rate ?? fallbackRate
+    }
     const tcId = acctTaxCodeMap.get(code)
     if (tcId) return taxCodeById.get(tcId)?.rate ?? fallbackRate
     return fallbackRate
   }
 
-  function extractTax(gross: number, code: string) {
-    const r = getRate(code)
+  function extractTax(gross: number, code: string, month: number) {
+    const r = getRate(code, month)
     return r > 0 ? gross * r / (1 + r) : 0
   }
 
@@ -64,10 +72,10 @@ export default async function GSTTrackerPage({
   ]
 
   const monthlyCollected = MONTHS.map((_, mi) =>
-    taxableRevCodes.reduce((s, code) => s + extractTax(entryMap[`${code}-${mi + 1}`] ?? 0, code), 0)
+    taxableRevCodes.reduce((s, code) => s + extractTax(entryMap[`${code}-${mi + 1}`] ?? 0, code, mi + 1), 0)
   )
   const monthlyITC = MONTHS.map((_, mi) =>
-    itcExpCodes.reduce((s, code) => s + extractTax(entryMap[`${code}-${mi + 1}`] ?? 0, code), 0)
+    itcExpCodes.reduce((s, code) => s + extractTax(entryMap[`${code}-${mi + 1}`] ?? 0, code, mi + 1), 0)
   )
   const monthlyNet = monthlyCollected.map((c, i) => c - monthlyITC[i])
 
@@ -94,13 +102,20 @@ export default async function GSTTrackerPage({
 
   // Tax code breakdown for transparency
   const taxCodeSummary = taxCodes.map((tc) => {
-    const codes = [...taxableRevCodes.filter((c) => (acctTaxCodeMap.get(c) ?? defaultTaxCode?.id) === tc.id)]
     let gross = 0
-    for (const code of codes) {
-      for (let m = 1; m <= 12; m++) gross += entryMap[`${code}-${m}`] ?? 0
+    let tax = 0
+    for (const code of taxableRevCodes) {
+      for (let m = 1; m <= 12; m++) {
+        const r = getRate(code, m)
+        const g = entryMap[`${code}-${m}`] ?? 0
+        const effectiveTcId = entryTaxOverride.get(`${code}-${m}`) ?? acctTaxCodeMap.get(code) ?? defaultTaxCode?.id
+        if (effectiveTcId === tc.id) {
+          gross += g
+          tax += r > 0 ? g * r / (1 + r) : 0
+        }
+      }
     }
-    const tax = gross > 0 ? gross * tc.rate / (1 + tc.rate) : 0
-    return { ...tc, gross, tax, accountCount: codes.length }
+    return { ...tc, gross, tax }
   }).filter((t) => t.gross > 0)
 
   return (

@@ -14,7 +14,9 @@ export async function getAccountConfigs(clientId: string) {
 
 export async function setAccountHidden(clientId: string, accountCode: string, isHidden: boolean) {
   const profile = await getCurrentProfile()
-  if (!profile || profile.role !== "ADMIN") throw new Error("Unauthorized")
+  if (!profile || (profile.role !== "ADMIN" && profile.role !== "ACCOUNTANT" && profile.role !== "BOOKKEEPER")) {
+    throw new Error("Unauthorized")
+  }
 
   await prisma.clientAccountConfig.upsert({
     where: { clientId_accountCode: { clientId, accountCode } },

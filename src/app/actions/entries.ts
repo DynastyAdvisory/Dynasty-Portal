@@ -24,7 +24,8 @@ export async function saveMonthlyEntry(
   fiscalYearId: string,
   accountCode: string,
   month: number,
-  grossAmount: number
+  grossAmount: number,
+  taxCodeId?: string | null
 ) {
   const profile = await getCurrentProfile()
   if (!profile) throw new Error("Unauthorized")
@@ -40,10 +41,12 @@ export async function saveMonthlyEntry(
     where: { clientId_fiscalYearId_accountCode_month: { clientId, fiscalYearId, accountCode, month } },
   })
 
+  const taxCodeUpdate = taxCodeId !== undefined ? { taxCodeId } : {}
+
   const entry = await prisma.monthlyEntry.upsert({
     where: { clientId_fiscalYearId_accountCode_month: { clientId, fiscalYearId, accountCode, month } },
-    create: { clientId, fiscalYearId, accountCode, month, grossAmount, updatedBy: profile.id },
-    update: { grossAmount, updatedBy: profile.id },
+    create: { clientId, fiscalYearId, accountCode, month, grossAmount, updatedBy: profile.id, ...taxCodeUpdate },
+    update: { grossAmount, updatedBy: profile.id, ...taxCodeUpdate },
   })
 
   await logAudit({
@@ -53,7 +56,7 @@ export async function saveMonthlyEntry(
     tableName: "monthly_entries",
     recordId: entry.id,
     oldValues: existing ? { grossAmount: existing.grossAmount } : null,
-    newValues: { grossAmount, accountCode, month },
+    newValues: { grossAmount, accountCode, month, ...(taxCodeId !== undefined ? { taxCodeId } : {}) },
   })
 
   revalidatePath(`/financials/${clientId}/monthly-entry`)
