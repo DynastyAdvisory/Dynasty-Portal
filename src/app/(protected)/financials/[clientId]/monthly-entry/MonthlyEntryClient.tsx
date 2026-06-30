@@ -2,12 +2,15 @@
 
 import { useState, useTransition, useRef } from "react"
 import { saveMonthlyEntry, lockPeriod, unlockPeriod } from "@/app/actions/entries"
+import { addCustomColumn, renameCustomColumn, deleteCustomColumn, saveCustomColumnEntry } from "@/app/actions/customcolumns"
 import { REVENUE_ROWS, COGS_ROWS, EXPENSE_ROWS, MONTHS, type AccountRow } from "@/lib/accounts"
-import { Lock, Unlock, Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-react"
+import { Lock, Unlock, Eye, EyeOff, ChevronDown, ChevronRight, Plus, Check, X, Pencil, Trash2 } from "lucide-react"
 
 interface TaxCodeOption { id: string; name: string; rate: number; isDefault: boolean }
 interface AccountConfigOption { accountCode: string; isHidden: boolean; taxCodeId: string | null }
 interface CustomAccountOption { code: string; name: string; section: string; subsection?: string }
+interface CustomColumnOption { id: string; name: string; sortOrder: number }
+interface CustomColumnEntryOption { customColumnId: string; accountCode: string; grossAmount: string }
 
 interface Props {
   clientId: string
@@ -18,6 +21,8 @@ interface Props {
   taxCodes: TaxCodeOption[]
   accountConfigs: AccountConfigOption[]
   customAccounts: CustomAccountOption[]
+  customColumns: CustomColumnOption[]
+  customColumnEntries: CustomColumnEntryOption[]
   isStaff: boolean
 }
 
@@ -32,7 +37,7 @@ function fmt(n: number) {
 }
 
 function parseInput(v: string): number {
-  const clean = v.replace(/,/g, "").trim()
+  const clean = v.replace(/,/g, "").trim().replace(/^=/, "")
   if (!clean) return 0
   if (/[+\-*/()]/.test(clean) && /^[\d\s+\-*/.()]+$/.test(clean)) {
     try {
@@ -45,9 +50,14 @@ function parseInput(v: string): number {
 }
 
 export default function MonthlyEntryClient({
-  clientId, fiscalYearId, defaultTaxRate, entries, locks, taxCodes, accountConfigs, customAccounts, isStaff,
+  clientId, fiscalYearId, defaultTaxRate, entries, locks, taxCodes, accountConfigs, customAccounts,
+  customColumns, customColumnEntries, isStaff,
 }: Props) {
   const [, startTransition] = useTransition()
+  const [addingCol, setAddingCol] = useState(false)
+  const [newColName, setNewColName] = useState("")
+  const [editingColId, setEditingColId] = useState<string | null>(null)
+  const [editingColName, setEditingColName] = useState("")
   const [hideEmpty, setHideEmpty] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [openTaxCell, setOpenTaxCell] = useState<string | null>(null) // `${code}-${month}`
@@ -58,6 +68,37 @@ export default function MonthlyEntryClient({
   for (const e of entries) {
     entryMap[`${e.accountCode}-${e.month}`] = parseFloat(String(e.grossAmount))
     entryTaxMap[`${e.accountCode}-${e.month}`] = e.taxCodeId
+  }
+
+  const ccEntryMap: Record<string, number> = {}
+  for (const e of customColumnEntries) {
+    ccEntryMap[`${e.customColumnId}-${e.accountCode}`] = parseFloat(e.grossAmount)
+  }
+
+  function handleAddCol() {
+    const name = newColName.trim()
+    if (!name) return
+    startTransition(async () => { await addCustomColumn(clientId, fiscalYearId, name) })
+    setNewColName("")
+    setAddingCol(false)
+  }
+
+  function handleRenameCol(id: string) {
+    const name = editingColName.trim()
+    if (!name) { setEditingColId(null); return }
+    startTransition(async () => { await renameCustomColumn(clientId, id, name) })
+    setEditingColId(null)
+  }
+
+  function handleDeleteCol(id: string) {
+    startTransition(async () => { await deleteCustomColumn(clientId, id) })
+  }
+
+  function handleCCBlur(columnId: string, accountCode: string, e: React.FocusEvent<HTMLInputElement>) {
+    const val = parseInput(e.target.value)
+    const prev = ccEntryMap[`${columnId}-${accountCode}`] ?? 0
+    if (val === prev) return
+    startTransition(async () => { await saveCustomColumnEntry(clientId, columnId, accountCode, val) })
   }
 
   const hiddenSet = new Set(accountConfigs.filter((c) => c.isHidden).map((c) => c.accountCode))
@@ -80,7 +121,7 @@ export default function MonthlyEntryClient({
   }
 
   const hasTaxCodes = taxCodes.length > 0
-  const colSpan = 14
+  const colSpan = 14 + customColumns.length
 
   const customBySection: Record<string, CustomAccountOption[]> = {}
   for (const ca of customAccounts) {
@@ -169,6 +210,59 @@ export default function MonthlyEntryClient({
                 </th>
               )
             })}
+            {customColumns.map((cc) => (
+              <th key={cc.id} className="text-center font-semibold text-gray-700 px-1.5 py-3 border-b border-gray-200 min-w-[90px] bg-blue-50/40">
+                {editingColId === cc.id ? (
+                  <div className="flex items-center gap-0.5">
+                    <input
+                      autoFocus
+                      value={editingColName}
+                      onChange={(e) => setEditingColName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleRenameCol(cc.id); if (e.key === "Escape") setEditingColId(null) }}
+                      className="w-full text-xs border border-blue-300 rounded px-1 py-0.5 focus:outline-none"
+                    />
+                    <button onClick={() => handleRenameCol(cc.id)} className="text-green-600 hover:text-green-800 shrink-0"><Check className="w-3 h-3" /></button>
+                    <button onClick={() => setEditingColId(null)} className="text-gray-400 hover:text-gray-600 shrink-0"><X className="w-3 h-3" /></button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-1 group">
+                    <span className="text-xs">{cc.name}</span>
+                    {isStaff && (
+                      <>
+                        <button onClick={() => { setEditingColId(cc.id); setEditingColName(cc.name) }} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity">
+                          <Pencil className="w-2.5 h-2.5" />
+                        </button>
+                        <button onClick={() => handleDeleteCol(cc.id)} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity">
+                          <Trash2 className="w-2.5 h-2.5" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </th>
+            ))}
+            {isStaff && (
+              <th className="text-center px-1.5 py-3 border-b border-gray-200 min-w-[60px] bg-blue-50/40">
+                {addingCol ? (
+                  <div className="flex items-center gap-0.5">
+                    <input
+                      autoFocus
+                      value={newColName}
+                      onChange={(e) => setNewColName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleAddCol(); if (e.key === "Escape") setAddingCol(false) }}
+                      className="w-full text-xs border border-blue-300 rounded px-1 py-0.5 focus:outline-none"
+                      placeholder="Name…"
+                    />
+                    <button onClick={handleAddCol} className="text-green-600 hover:text-green-800 shrink-0"><Check className="w-3 h-3" /></button>
+                    <button onClick={() => setAddingCol(false)} className="text-gray-400 hover:text-gray-600 shrink-0"><X className="w-3 h-3" /></button>
+                  </div>
+                ) : (
+                  <button onClick={() => setAddingCol(true)} className="text-gray-400 hover:text-blue-600 transition-colors" title="Add column">
+                    <Plus className="w-4 h-4" />
+                  </button>
+                )}
+              </th>
+            )}
             <th className="text-right font-semibold text-gray-700 px-4 py-3 border-b border-gray-200 min-w-[90px]">Total</th>
           </tr>
         </thead>
@@ -206,7 +300,7 @@ export default function MonthlyEntryClient({
               if (row.type === "SUBSECTION") {
                 return (
                   <tr key={`${key}-sub-${idx}`} className="bg-gray-50">
-                    <td colSpan={colSpan} className="px-4 py-1.5 text-xs font-semibold text-gray-500 italic border-b border-gray-100">
+                    <td colSpan={colSpan} className="px-4 py-1.5 text-xs font-semibold text-gray-600 italic border-b border-gray-100">
                       {row.label}
                     </td>
                   </tr>
@@ -223,7 +317,10 @@ export default function MonthlyEntryClient({
                 const monthTotals = Array.from({ length: 12 }, (_, mi) =>
                   accRows.reduce((s, r) => s + (entryMap[`${r.code}-${mi + 1}`] ?? 0), 0)
                 )
-                const grandTotal = monthTotals.reduce((a, b) => a + b, 0)
+                const ccTotals = customColumns.map((cc) =>
+                  accRows.reduce((s, r) => s + (ccEntryMap[`${cc.id}-${r.code}`] ?? 0), 0)
+                )
+                const grandTotal = monthTotals.reduce((a, b) => a + b, 0) + ccTotals.reduce((a, b) => a + b, 0)
                 const isBold = row.type === "TOTAL"
                 return (
                   <tr key={`${key}-total-${idx}`} className={`${isBold ? "bg-gray-100 font-bold" : "bg-gray-50 font-semibold"} border-t border-gray-300`}>
@@ -233,6 +330,12 @@ export default function MonthlyEntryClient({
                         {v !== 0 ? fmt(v) : ""}
                       </td>
                     ))}
+                    {ccTotals.map((v, ci) => (
+                      <td key={`cc-${ci}`} className="px-1.5 py-2 text-right text-gray-800 tabular-nums text-xs bg-blue-50/30">
+                        {v !== 0 ? fmt(v) : ""}
+                      </td>
+                    ))}
+                    {isStaff && <td className="bg-blue-50/30" />}
                     <td className="px-4 py-2 text-right text-gray-900 tabular-nums text-xs">{grandTotal !== 0 ? fmt(grandTotal) : ""}</td>
                   </tr>
                 )
@@ -317,8 +420,25 @@ export default function MonthlyEntryClient({
                       </td>
                     )
                   })}
+                  {customColumns.map((cc) => {
+                    const ccVal = ccEntryMap[`${cc.id}-${code}`] ?? 0
+                    return (
+                      <td key={cc.id} className="px-1 py-1 bg-blue-50/20">
+                        <input
+                          defaultValue={ccVal > 0 ? fmt(ccVal) : ""}
+                          onBlur={(e) => handleCCBlur(cc.id, code, e)}
+                          className="w-full text-right text-xs px-1.5 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-gray-300"
+                        />
+                      </td>
+                    )
+                  })}
+                  {isStaff && <td className="bg-blue-50/20" />}
                   <td className="px-4 py-1.5 text-right text-gray-900 font-medium tabular-nums">
-                    {rowTotal !== 0 ? fmt(rowTotal) : ""}
+                    {(() => {
+                      const ccSum = customColumns.reduce((s, cc) => s + (ccEntryMap[`${cc.id}-${code}`] ?? 0), 0)
+                      const total = rowTotal + ccSum
+                      return total !== 0 ? fmt(total) : ""
+                    })()}
                   </td>
                 </tr>
               )

@@ -71,7 +71,7 @@ export default function AppHeader({ userName, userEmail, userRole, activePath }:
                 Users
               </Link>
               <Link
-                href="/admin/audit-log"
+                href="/settings/audit-log"
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   activePath === "audit-log"
                     ? "bg-purple-100 text-purple-800"

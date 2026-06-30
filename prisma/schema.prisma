@@ -61,6 +61,8 @@ model Client {
   taxCodes            TaxCode[]
   accountConfigs      ClientAccountConfig[]
   customAccounts      ClientCustomAccount[]
+  customColumns       CustomColumn[]
+  customColumnEntries CustomColumnEntry[]
 
   @@map("clients")
 }
@@ -92,6 +94,7 @@ model FiscalYear {
   monthlyEntries      MonthlyEntry[]
   balanceSheetEntries BalanceSheetEntry[]
   periodLocks         PeriodLock[]
+  customColumns       CustomColumn[]
 
   @@unique([clientId, year])
   @@map("fiscal_years")
@@ -201,6 +204,37 @@ model ClientCustomAccount {
 
   @@unique([clientId, code])
   @@map("client_custom_accounts")
+}
+
+// ─── Custom columns (extra periods beyond Dec) ───────────
+
+model CustomColumn {
+  id           String   @id @default(cuid())
+  clientId     String   @map("client_id")
+  fiscalYearId String   @map("fiscal_year_id")
+  name         String
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  entries    CustomColumnEntry[]
+
+  @@map("custom_columns")
+}
+
+model CustomColumnEntry {
+  id             String  @id @default(cuid())
+  customColumnId String  @map("custom_column_id")
+  clientId       String  @map("client_id")
+  accountCode    String  @map("account_code")
+  grossAmount    Decimal @default(0) @map("gross_amount") @db.Decimal(12, 2)
+
+  customColumn CustomColumn @relation(fields: [customColumnId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([customColumnId, accountCode])
+  @@map("custom_column_entries")
 }
 
 // ─── Audit ────────────────────────────────────────────────

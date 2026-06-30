@@ -32,12 +32,14 @@ export default async function MonthlyEntryPage({
     })
   }
 
-  const [entries, locks, taxCodes, accountConfigs, customAccounts] = await Promise.all([
+  const [entries, locks, taxCodes, accountConfigs, customAccounts, customColumns, customColumnEntries] = await Promise.all([
     prisma.monthlyEntry.findMany({ where: { clientId, fiscalYearId: fiscalYear.id } }),
     prisma.periodLock.findMany({ where: { clientId, fiscalYearId: fiscalYear.id } }),
     prisma.taxCode.findMany({ where: { clientId }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
     prisma.clientAccountConfig.findMany({ where: { clientId } }),
     prisma.clientCustomAccount.findMany({ where: { clientId, isActive: true }, orderBy: { sortOrder: "asc" } }),
+    prisma.customColumn.findMany({ where: { clientId, fiscalYearId: fiscalYear.id }, orderBy: { sortOrder: "asc" } }),
+    prisma.customColumnEntry.findMany({ where: { clientId, customColumn: { fiscalYearId: fiscalYear.id } } }),
   ])
 
   const isStaff = profile.role !== "CLIENT"
@@ -59,6 +61,8 @@ export default async function MonthlyEntryPage({
         taxCodes={taxCodes.map((t) => ({ id: t.id, name: t.name, rate: t.rate, isDefault: t.isDefault }))}
         accountConfigs={accountConfigs.map((c) => ({ accountCode: c.accountCode, isHidden: c.isHidden, taxCodeId: c.taxCodeId }))}
         customAccounts={customAccounts.map((c) => ({ code: c.code, name: c.name, section: c.section, subsection: c.subsection ?? undefined }))}
+        customColumns={customColumns.map((c) => ({ id: c.id, name: c.name, sortOrder: c.sortOrder }))}
+        customColumnEntries={customColumnEntries.map((e) => ({ customColumnId: e.customColumnId, accountCode: e.accountCode, grossAmount: e.grossAmount.toString() }))}
         isStaff={isStaff}
       />
     </div>
