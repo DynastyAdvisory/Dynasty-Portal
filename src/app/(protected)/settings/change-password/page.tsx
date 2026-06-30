@@ -43,11 +43,11 @@ export default function ChangePasswordPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b border-gray-200 h-14 px-6 flex items-center gap-3">
-        <Link href="/hub" className="text-gray-400 hover:text-gray-600 transition-colors">
-          <ArrowLeft className="w-4 h-4" />
+      <header className="bg-white border-b border-gray-200 h-16 px-6 flex items-center gap-3">
+        <Link href="/settings" className="text-gray-400 hover:text-gray-600 transition-colors">
+          <ArrowLeft className="w-5 h-5" />
         </Link>
-        <span className="text-sm font-semibold text-gray-900">Change Password</span>
+        <span className="text-base font-semibold text-gray-900">Change Password</span>
       </header>
 
       <div className="flex-1 flex items-center justify-center p-6">

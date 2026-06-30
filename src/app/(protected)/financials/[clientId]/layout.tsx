@@ -52,7 +52,8 @@ export default async function ClientFinancialsLayout({
       clientName={client.name}
       fiscalYears={fiscalYears}
       activeFiscalYearId={openYear.id}
-      userName={profile.email}
+      userName={profile.name ?? profile.email}
+      userEmail={profile.email}
       isAdmin={profile.role === "ADMIN" || profile.role === "ACCOUNTANT"}
     >
       {children}

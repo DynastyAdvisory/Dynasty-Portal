@@ -6,5 +6,5 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const profile = await getCurrentProfile()
   if (!profile || profile.role !== "ADMIN") redirect("/hub")
 
-  return <AdminShell userName={profile.email}>{children}</AdminShell>
+  return <AdminShell userName={profile.name ?? profile.email} userEmail={profile.email}>{children}</AdminShell>
 }

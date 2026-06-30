@@ -99,6 +99,18 @@ export async function removeUserFromClient(profileId: string, clientId: string) 
   revalidatePath("/admin/users")
 }
 
+export async function resetUserPassword(profileId: string, newPassword: string) {
+  const me = await getCurrentProfile()
+  if (!me || me.role !== "ADMIN") throw new Error("Unauthorized")
+  if (newPassword.length < 8) throw new Error("Password must be at least 8 characters")
+
+  const supabaseAdmin = getAdminClient()
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(profileId, { password: newPassword })
+  if (error) throw new Error(error.message)
+  revalidatePath("/admin/users")
+  revalidatePath("/settings/users")
+}
+
 export async function deleteUser(profileId: string) {
   const me = await getCurrentProfile()
   if (!me || me.role !== "ADMIN") throw new Error("Unauthorized")
